@@ -1,4 +1,4 @@
-# BIL496 - Bitirme Projesi 
+# BIL495 - Bitirme Projesi 
 
 ##  Takım İsmi
   CtrlAltDel
