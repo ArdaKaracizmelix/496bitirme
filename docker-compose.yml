@@ -13,17 +13,35 @@ services:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - excursa_network
 
   backend:
     build: ./backend
     container_name: excursa_backend
-    command: python manage.py runserver 0.0.0.0:8000
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
     volumes:
       - ./backend:/app
     ports:
       - "8000:8000"
+    environment:
+      - DEBUG=True
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=excursa
+      - DB_USER=excursa_user
+      - DB_PASSWORD=excursa_pass
+      - DB_HOST=db
+      - DB_PORT=5432
     depends_on:
       - db
+    networks:
+      - excursa_network
 
 volumes:
   postgres_data:
+
+networks:
+  excursa_network:
+    driver: bridge
