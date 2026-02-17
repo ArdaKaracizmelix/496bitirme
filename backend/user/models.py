@@ -27,11 +27,14 @@ class UserProfile(models.Model):
         related_name='followers'
     )
 
-    def update_vector(self,tag:str,weight:float) :
-       return # TODO:
+    def update_vector(self, tag: str, weight: float):
+        if self.preferences_vector is None:
+            self.preferences_vector = {}
+        self.preferences_vector[tag] = self.preferences_vector.get(tag, 0.0) + weight
+        self.save(update_fields=['preferences_vector'])
 
     def get_feed_vector(self):
-        return #TODO:
+        return self.preferences_vector
 
 
     def follow(self,target_profile: "UserProfile"):
