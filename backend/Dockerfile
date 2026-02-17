@@ -11,6 +11,7 @@ COPY requirements.txt /app/
 
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
+#okulda bak bi de şöyle deneyelim RUN pip install -r /app/requirements.txt
 
 COPY . /app/
 
