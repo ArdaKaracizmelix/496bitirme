@@ -5,13 +5,30 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y gcc postgresql-client
+# Install system dependencies for PostGIS/GDAL and PostgreSQL
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    postgresql-client \
+    libpq-dev \
+    gdal-bin \
+    libgdal-dev \
+    libgeos-dev \
+    libproj-dev \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set GDAL environment variables for Python bindings
+ENV GDAL_CONFIG=/usr/bin/gdal-config
+ENV GDAL_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
+ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
 COPY requirements.txt /app/
 
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
-#okulda bak bi de şöyle deneyelim RUN pip install -r /app/requirements.txt
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /app/
 

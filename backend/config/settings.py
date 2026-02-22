@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -38,8 +39,12 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    # GIS support
+    'django.contrib.gis',
+    # Local apps
     'core',
     'user',
+    'locations',
 ]
 
 MIDDLEWARE = [
@@ -77,12 +82,12 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'excursa',
-        'USER': 'excursa_user',
-        'PASSWORD': 'excursa_pass',
-        'HOST': 'db',
-        'PORT': '5432',
+        'ENGINE': os.getenv('DB_ENGINE', 'django.contrib.gis.db.backends.postgis'),
+        'NAME': os.getenv('DB_NAME', 'excursa'),
+        'USER': os.getenv('DB_USER', 'excursa_user'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'excursa_pass'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
 
@@ -134,3 +139,18 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 10,
 }
+
+# External API Keys (loaded from environment variables)
+# DO NOT commit API keys to version control
+GOOGLE_PLACES_API_KEY = os.getenv('GOOGLE_PLACES_API_KEY', None)
+FOURSQUARE_API_KEY = os.getenv('FOURSQUARE_API_KEY', None)
+
+# GDAL Configuration
+if os.name == 'posix':
+    # Auto-detect GDAL library path for Docker (Debian/Ubuntu based images)
+    for path in ['/usr/lib/x86_64-linux-gnu/libgdal.so', 
+                 '/usr/lib/aarch64-linux-gnu/libgdal.so', 
+                 '/usr/lib/libgdal.so']:
+        if os.path.exists(path):
+            GDAL_LIBRARY_PATH = path
+            break
