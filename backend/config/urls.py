@@ -6,4 +6,5 @@ urlpatterns = [
     path('api/',include('core.urls')),
     path('api/user/',include('user.urls')),
     path('api/locations/', include('locations.urls')),
+    path('api/recommendations/', include('recommendations.urls')),
 ]
