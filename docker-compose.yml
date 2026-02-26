@@ -2,17 +2,23 @@ version: "3.9"
 
 services:
   db:
-    image: postgres:16
+    image: postgis/postgis:16-3.4
     container_name: excursa_db
     restart: always
     environment:
       POSTGRES_DB: excursa
       POSTGRES_USER: excursa_user
       POSTGRES_PASSWORD: excursa_pass
+      POSTGRES_INITDB_ARGS: "-c locale=en_US.UTF-8"
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U excursa_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - excursa_network
 
@@ -27,15 +33,24 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # Django Settings
       - DEBUG=True
-      - DB_ENGINE=django.db.backends.postgresql
+      - PYTHONUNBUFFERED=1
+      # GDAL Configuration
+      - GDAL_CONFIG=/usr/bin/gdal-config
+      # Database Configuration
+      - DB_ENGINE=django.contrib.gis.db.backends.postgis
       - DB_NAME=excursa
       - DB_USER=excursa_user
       - DB_PASSWORD=excursa_pass
       - DB_HOST=db
       - DB_PORT=5432
+      # External API Keys (from .env file or secrets)
+      - GOOGLE_PLACES_API_KEY=${GOOGLE_PLACES_API_KEY:-}
+      - FOURSQUARE_API_KEY=${FOURSQUARE_API_KEY:-}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
       - excursa_network
 
