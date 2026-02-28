@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'user',
     'locations',
     'recommendations',
+    'community',
 ]
 
 MIDDLEWARE = [
@@ -91,6 +92,40 @@ DATABASES = {
         'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
+
+# MongoDB Configuration for Community App
+MONGODB_DATABASES = {
+    'default': {
+        'name': os.getenv('MONGO_DB_NAME', 'excursa_community'),
+        'host': os.getenv('MONGO_HOST', 'localhost'),
+        'port': int(os.getenv('MONGO_PORT', '27017')),
+        'username': os.getenv('MONGO_USER', ''),
+        'password': os.getenv('MONGO_PASSWORD', ''),
+        'tz_aware': True,
+    }
+}
+
+# Configure mongoengine
+import mongoengine
+try:
+    if MONGODB_DATABASES['default']['username'] and MONGODB_DATABASES['default']['password']:
+        mongoengine.connect(
+            db=MONGODB_DATABASES['default']['name'],
+            host=MONGODB_DATABASES['default']['host'],
+            port=MONGODB_DATABASES['default']['port'],
+            username=MONGODB_DATABASES['default']['username'],
+            password=MONGODB_DATABASES['default']['password'],
+            tz_aware=MONGODB_DATABASES['default']['tz_aware'],
+        )
+    else:
+        mongoengine.connect(
+            db=MONGODB_DATABASES['default']['name'],
+            host=MONGODB_DATABASES['default']['host'],
+            port=MONGODB_DATABASES['default']['port'],
+            tz_aware=MONGODB_DATABASES['default']['tz_aware'],
+        )
+except Exception as e:
+    print(f"MongoDB connection warning: {e}")
 
 
 

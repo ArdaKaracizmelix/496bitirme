@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.core.validators import MinValueValidator, MaxValueValidator
 from locations.models import POI
 from user.models import UserProfile
 
@@ -50,7 +51,7 @@ class Review(models.Model):
     poi = models.ForeignKey(POI, on_delete=models.CASCADE, related_name='reviews')
     rating = models.FloatField(
         help_text="Rating from 0.0 to 5.0",
-        validators=[lambda x: 0 <= x <= 5]
+        validators=[MinValueValidator(0.0), MaxValueValidator(5.0)]
     )
     comment = models.TextField(blank=True, default="")
     is_verified_purchase = models.BooleanField(default=False)
