@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'locations',
     'recommendations',
     'community',
+    'trips',
 ]
 
 MIDDLEWARE = [

@@ -8,4 +8,5 @@ urlpatterns = [
     path('api/locations/', include('locations.urls')),
     path('api/recommendations/', include('recommendations.urls')),
     path('api/community/', include('community.urls')),
+    path('api/trips/', include('trips.urls')),
 ]
