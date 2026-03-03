@@ -10,4 +10,5 @@ urlpatterns = [
     path('api/community/', include('community.urls')),
     path('api/notifications/', include('notifications.urls')),
     path('api/trips/', include('trips.urls')),
+    path('api/media_storage/', include('media_storage.urls')),
 ]
