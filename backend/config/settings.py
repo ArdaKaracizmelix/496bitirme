@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'trips',
     'task_queue',
     'media_storage',
+    'core'
 ]
 
 MIDDLEWARE = [
@@ -61,6 +62,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Global exception handler (must be near the top to catch all exceptions)
+    'core.middleware.GlobalExceptionHandler',
 ]
 
 ROOT_URLCONF = 'config.urls'
