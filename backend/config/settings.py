@@ -51,7 +51,6 @@ INSTALLED_APPS = [
     'trips',
     'task_queue',
     'media_storage',
-    'core'
 ]
 
 MIDDLEWARE = [

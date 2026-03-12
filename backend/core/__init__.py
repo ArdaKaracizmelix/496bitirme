@@ -10,7 +10,6 @@ These are designed following DRY (Don't Repeat Yourself) principles to ensure
 code consistency and standardized error handling across the entire application.
 """
 
-from .models import TimeStampedModel
 from .middleware import GlobalExceptionHandler
 from .exceptions import (
     APIException,
@@ -23,12 +22,9 @@ from .exceptions import (
     TooManyRequestsException,
     InternalServerException,
 )
-from .admin import TimeStampedModelAdmin
 
 __all__ = [
-    'TimeStampedModel',
     'GlobalExceptionHandler',
-    'TimeStampedModelAdmin',
     'APIException',
     'BadRequestException',
     'UnauthorizedException',
