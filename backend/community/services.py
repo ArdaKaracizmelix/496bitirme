@@ -165,18 +165,22 @@ class FeedService:
         recent_hours = 24
         cutoff_time = timezone.now() - timedelta(hours=recent_hours)
         
+        # Query recent public posts without the problematic _id__nin
         posts = SocialPost.objects(
             created_at__gte=cutoff_time,
-            visibility='PUBLIC',
-            _id__nin=exclude_ids
+            visibility='PUBLIC'
         ).limit(100)  # Score all recent posts
         
-        # Calculate virality scores
+        # Convert exclude_ids to strings for comparison
+        exclude_id_strs = set(str(eid) for eid in exclude_ids)
+        
+        # Calculate virality scores, filtering out excluded posts
         scored_posts = []
         for post in posts:
-            score = self.calculate_virality_score(post)
-            dto = self._post_to_dto(post)
-            scored_posts.append((score, dto))
+            if str(post.id) not in exclude_id_strs:
+                score = self.calculate_virality_score(post)
+                dto = self._post_to_dto(post)
+                scored_posts.append((score, dto))
         
         # Sort by score and return top ones
         scored_posts.sort(key=lambda x: x[0], reverse=True)
