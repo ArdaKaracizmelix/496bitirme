@@ -15,21 +15,28 @@ class ChatSession:
         self.history = []
 
     def process_message(self, message: str) -> dict:
+        # Kullanıcının intentini bul
         intent = self.intent_parser.parse_intent(message)
 
+        # Kullanıcı mesajını history'ye ekle
         self.history.append({
             "role": "user",
             "content": message
         })
 
+        # LLM'e gönderilecek message listesini oluştur
         messages = self._build_messages(intent=intent)
+
+        # LLM cevabını al
         llm_response = self.llm_client.generate_response(messages=messages)
 
+        # Asistan cevabını history'ye ekle
         self.history.append({
             "role": "assistant",
             "content": llm_response
         })
 
+        # Sonucu döndür
         return {
             "intent": intent,
             "response": llm_response,
@@ -46,6 +53,7 @@ class ChatSession:
             }
         ]
 
+        # Son 10 mesajı bağlam olarak ekle
         for item in self.history[-10:]:
             messages.append(item)
 
@@ -61,7 +69,10 @@ class ChatSession:
         )
 
         intent_prompts = {
-            "greeting": "The user is greeting you. Respond warmly and invite them to continue.",
+            "greeting": (
+                "The user is greeting you. "
+                "Respond warmly and invite them to continue."
+            ),
             "travel_recommendation": (
                 "The user likely wants travel recommendations. "
                 "Ask follow-up questions if city, budget, duration, or interests are missing."
