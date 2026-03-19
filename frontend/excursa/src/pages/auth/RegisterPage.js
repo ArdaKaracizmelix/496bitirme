@@ -1,40 +1,111 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView
+  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Pressable
 } from 'react-native';
-import api from '../../services/api';
+import AuthManager from '../../services/AuthManager';
 
 export default function RegisterPage({ navigation }) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [validationErrors, setValidationErrors] = useState({});
 
+  /**
+   * Validates email format using regex
+   */
+  const validateEmail = (text) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(text);
+  };
+
+  /**
+   * Validates the entire form
+   */
+  const validateForm = () => {
+    const errors = {};
+
+    if (!fullName.trim()) {
+      errors.fullName = 'Ad Soyad gerekli';
+    } else if (fullName.trim().length < 2) {
+      errors.fullName = 'Ad Soyad en az 2 karakter olmalı';
+    }
+
+    if (!email.trim()) {
+      errors.email = 'Email adresi gerekli';
+    } else if (!validateEmail(email)) {
+      errors.email = 'Geçerli bir email adresi girin';
+    }
+
+    if (!password) {
+      errors.password = 'Şifre gerekli';
+    } else if (password.length < 8) {
+      errors.password = 'Şifre en az 8 karakter olmalı';
+    }
+
+    if (!confirmPassword) {
+      errors.confirmPassword = 'Şifre tekrarı gerekli';
+    } else if (password !== confirmPassword) {
+      errors.confirmPassword = 'Şifreler eşleşmiyor';
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  /**
+   * Handles user registration
+   */
   const handleRegister = async () => {
-    if (!fullName || !email || !password || !confirmPassword) {
-      setError('Tüm alanları doldur.');
+    // Validate form
+    if (!validateForm()) {
       return;
     }
-    if (password !== confirmPassword) {
-      setError('Şifreler eşleşmiyor.');
-      return;
-    }
-    if (password.length < 8) {
-      setError('Şifre en az 8 karakter olmalı.');
-      return;
-    }
-    setLoading(true);
-    setError('');
+
+    setIsLoading(true);
     try {
-      await api.post('/user/register/', { full_name: fullName, email, password });
-      navigation.navigate('Login');
-    } catch (e) {
-      setError('Kayıt başarısız. Tekrar dene.');
+      const result = await AuthManager.register({
+        fullName,
+        email,
+        password,
+      });
+
+      // Navigate to Interest Selection after successful registration
+      navigation.navigate('InterestSelection', { user: result.user });
+    } catch (error) {
+      const errorMsg = error.response?.data?.detail ||
+                       error.response?.data?.message ||
+                       error.response?.data?.email?.[0] ||
+                       'Kayıt başarısız. Tekrar dene.';
+      
+      setValidationErrors({
+        ...validationErrors,
+        general: errorMsg,
+      });
     } finally {
-      setLoading(false);
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * Handle field changes and clear related errors
+   */
+  const handleFieldChange = (field, value) => {
+    const fieldSetters = {
+      fullName: setFullName,
+      email: setEmail,
+      password: setPassword,
+      confirmPassword: setConfirmPassword,
+    };
+
+    if (fieldSetters[field]) {
+      fieldSetters[field](value);
+      // Clear error for this field
+      const newErrors = { ...validationErrors };
+      delete newErrors[field];
+      setValidationErrors(newErrors);
     }
   };
 
@@ -43,56 +114,108 @@ export default function RegisterPage({ navigation }) {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.inner}>
+      <ScrollView
+        contentContainerStyle={styles.inner}
+        scrollEnabled={true}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.title}>EXCURSA</Text>
         <Text style={styles.subtitle}>Hesap oluştur</Text>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {validationErrors.general ? (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{validationErrors.general}</Text>
+          </View>
+        ) : null}
 
-        <TextInput
-          style={styles.input}
-          placeholder="Ad Soyad"
-          value={fullName}
-          onChangeText={setFullName}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Email"
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Şifre"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Şifre Tekrar"
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          secureTextEntry
-        />
+        {/* Full Name Input */}
+        <View>
+          <TextInput
+            style={[styles.input, validationErrors.fullName && styles.inputError]}
+            placeholder="Ad Soyad"
+            value={fullName}
+            onChangeText={(text) => handleFieldChange('fullName', text)}
+            autoCapitalize="words"
+            editable={!isLoading}
+            placeholderTextColor="#999"
+          />
+          {validationErrors.fullName ? (
+            <Text style={styles.fieldError}>{validationErrors.fullName}</Text>
+          ) : null}
+        </View>
 
-        <TouchableOpacity style={styles.button} onPress={handleRegister} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator color="#fff" />
+        {/* Email Input */}
+        <View>
+          <TextInput
+            style={[styles.input, validationErrors.email && styles.inputError]}
+            placeholder="Email"
+            value={email}
+            onChangeText={(text) => handleFieldChange('email', text)}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            editable={!isLoading}
+            placeholderTextColor="#999"
+          />
+          {validationErrors.email ? (
+            <Text style={styles.fieldError}>{validationErrors.email}</Text>
+          ) : null}
+        </View>
+
+        {/* Password Input */}
+        <View>
+          <TextInput
+            style={[styles.input, validationErrors.password && styles.inputError]}
+            placeholder="Şifre"
+            value={password}
+            onChangeText={(text) => handleFieldChange('password', text)}
+            secureTextEntry
+            editable={!isLoading}
+            placeholderTextColor="#999"
+          />
+          {validationErrors.password ? (
+            <Text style={styles.fieldError}>{validationErrors.password}</Text>
+          ) : null}
+        </View>
+
+        {/* Confirm Password Input */}
+        <View>
+          <TextInput
+            style={[styles.input, validationErrors.confirmPassword && styles.inputError]}
+            placeholder="Şifre Tekrar"
+            value={confirmPassword}
+            onChangeText={(text) => handleFieldChange('confirmPassword', text)}
+            secureTextEntry
+            editable={!isLoading}
+            placeholderTextColor="#999"
+          />
+          {validationErrors.confirmPassword ? (
+            <Text style={styles.fieldError}>{validationErrors.confirmPassword}</Text>
+          ) : null}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.button, isLoading && styles.buttonDisabled]}
+          onPress={handleRegister}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#fff" size="small" />
           ) : (
             <Text style={styles.buttonText}>Kayıt Ol</Text>
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-          <Text style={styles.link}>Zaten hesabın var mı? Giriş yap</Text>
-        </TouchableOpacity>
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Zaten hesabın var mı? </Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Login')} disabled={isLoading}>
+            <Text style={styles.link}>Giriş yap</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {
@@ -116,14 +239,37 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 40,
   },
+  errorContainer: {
+    width: '100%',
+    backgroundColor: '#ffe6e6',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#cc0000',
+  },
+  errorText: {
+    color: '#cc0000',
+    fontSize: 14,
+  },
   input: {
     width: '100%',
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 8,
     fontSize: 16,
+    backgroundColor: '#f9f9f9',
+  },
+  inputError: {
+    borderColor: '#cc0000',
+  },
+  fieldError: {
+    color: '#cc0000',
+    fontSize: 12,
+    marginBottom: 12,
+    marginLeft: 4,
   },
   button: {
     width: '100%',
@@ -131,20 +277,35 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 24,
+    marginTop: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
-  error: {
-    color: 'red',
-    marginBottom: 16,
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  footerText: {
+    color: '#666',
+    fontSize: 14,
   },
   link: {
     color: '#1a1a2e',
     fontSize: 14,
+    fontWeight: '600',
     textDecorationLine: 'underline',
   },
 });

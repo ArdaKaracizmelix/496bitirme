@@ -5,6 +5,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 
 import LoginPage from '../pages/auth/LoginPage';
 import RegisterPage from '../pages/auth/RegisterPage';
+import InterestSelectionPage from '../pages/auth/InterestSelectionPage';
 import MapPage from '../pages/map/MapPage';
 import SocialPage from '../pages/social/SocialPage';
 import ItineraryPage from '../pages/itinerary/ItineraryPage';
@@ -18,21 +19,80 @@ const Stack = createStackNavigator();
 
 function MainTabs() {
   return (
-    <Tab.Navigator>
-      <Tab.Screen name="Map" component={MapPage} />
-      <Tab.Screen name="Social" component={SocialPage} />
-      <Tab.Screen name="Itinerary" component={ItineraryPage} />
-      <Tab.Screen name="Chatbot" component={ChatbotPage} />
-      <Tab.Screen name="Profile" component={ProfilePage} />
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+      }}
+    >
+      <Tab.Screen 
+        name="Map" 
+        component={MapPage}
+        options={{
+          tabBarLabel: 'Harita',
+        }}
+      />
+      <Tab.Screen 
+        name="Social" 
+        component={SocialPage}
+        options={{
+          tabBarLabel: 'Sosyal',
+        }}
+      />
+      <Tab.Screen 
+        name="Itinerary" 
+        component={ItineraryPage}
+        options={{
+          tabBarLabel: 'Rota',
+        }}
+      />
+      <Tab.Screen 
+        name="Chatbot" 
+        component={ChatbotPage}
+        options={{
+          tabBarLabel: 'Chatbot',
+        }}
+      />
+      <Tab.Screen 
+        name="Profile" 
+        component={ProfilePage}
+        options={{
+          tabBarLabel: 'Profil',
+        }}
+      />
     </Tab.Navigator>
   );
 }
 
 function AuthStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Login" component={LoginPage} />
-      <Stack.Screen name="Register" component={RegisterPage} />
+    <Stack.Navigator 
+      screenOptions={{ 
+        headerShown: false,
+        animationEnabled: true,
+      }}
+    >
+      <Stack.Screen 
+        name="Login" 
+        component={LoginPage}
+        options={{
+          cardStyle: { backgroundColor: '#fff' },
+        }}
+      />
+      <Stack.Screen 
+        name="Register" 
+        component={RegisterPage}
+        options={{
+          cardStyle: { backgroundColor: '#fff' },
+        }}
+      />
+      <Stack.Screen 
+        name="InterestSelection" 
+        component={InterestSelectionPage}
+        options={{
+          cardStyle: { backgroundColor: '#fff' },
+          gestureEnabled: false, // Prevent swiping back
+        }}
+      />
     </Stack.Navigator>
   );
 }

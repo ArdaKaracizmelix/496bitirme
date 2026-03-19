@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, Image, FlatList
 } from 'react-native';
+import useAuthStore from '../../store/authStore';
 
 const MOCK_USER = {
   name: 'Mehmet Yekta Pamuk',
@@ -35,7 +36,18 @@ const MOCK_TRIPS = [
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState('GÖNDERILER');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const logout = useAuthStore((state) => state.logout);
   const tabs = ['GÖNDERILER', 'ROTALAR'];
+
+  const handleLogout = async () => {
+    try {
+      setIsLoggingOut(true);
+      await logout();
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   const renderPostGrid = () => (
     <View style={styles.grid}>
@@ -146,8 +158,14 @@ export default function ProfilePage() {
       {activeTab === 'GÖNDERILER' ? renderPostGrid() : renderTrips()}
 
       {/* Logout */}
-      <TouchableOpacity style={styles.logoutButton}>
-        <Text style={styles.logoutText}>Çıkış Yap</Text>
+      <TouchableOpacity
+        style={styles.logoutButton}
+        onPress={handleLogout}
+        disabled={isLoggingOut}
+      >
+        <Text style={styles.logoutText}>
+          {isLoggingOut ? 'Çıkış yapılıyor...' : 'Çıkış Yap'}
+        </Text>
       </TouchableOpacity>
     </ScrollView>
   );
