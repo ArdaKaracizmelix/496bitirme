@@ -18,7 +18,8 @@ try:
     from dotenv import load_dotenv
     env_path = Path(__file__).resolve().parent.parent / '.env'
     if env_path.exists():
-        load_dotenv(env_path)
+        # Ensure backend/.env is the single source of truth in local dev.
+        load_dotenv(env_path, override=True)
 except ImportError:
     # If python-dotenv is not installed, os.getenv() will still work
     # but will only read from actual environment variables

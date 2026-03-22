@@ -5,6 +5,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from recommendations.models import Interaction, Review, InteractionType
 from recommendations.serializers import (
@@ -24,6 +25,12 @@ class InteractionViewSet(viewsets.ModelViewSet):
     queryset = Interaction.objects.all()
     serializer_class = InteractionSerializer
     
+    def get_permissions(self):
+        # Read can be public, writes require authentication.
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+    
     def get_queryset(self):
         """Filter interactions by user if user_id is provided"""
         user_id = self.request.query_params.get('user_id')
@@ -33,7 +40,7 @@ class InteractionViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """Save interaction and update user preference vector"""
-        interaction = serializer.save()
+        interaction = serializer.save(user=self.request.user.profile)
         
         # Update user preference vector based on interaction type
         scoring_service = ScoringService()
@@ -47,18 +54,27 @@ class ReviewViewSet(viewsets.ModelViewSet):
     queryset = Review.objects.all()
     serializer_class = ReviewSerializer
     
+    def get_permissions(self):
+        # Read can be public, writes require authentication.
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+    
     def get_queryset(self):
         """Filter reviews by POI or user if provided"""
-        poi_id = self.request.query_params.get('poi_id')
+        poi_id = self.request.query_params.get('poi_id') or self.request.query_params.get('poi')
         user_id = self.request.query_params.get('user_id')
         
-        queryset = Review.objects.all()
+        queryset = Review.objects.all().order_by('-created_at')
         if poi_id:
             queryset = queryset.filter(poi_id=poi_id)
         if user_id:
             queryset = queryset.filter(user_id=user_id)
         
         return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user.profile)
 
 
 class GenerateRecommendationsView(APIView):
