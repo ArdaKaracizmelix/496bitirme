@@ -34,10 +34,8 @@ export default function ProfilePage() {
       }
 
       const storedUser = JSON.parse(storedUserRaw);
-      const uuid = storedUser.id; // "88cf9a68-692c-4b91-bb83-943c06dad426"
+      const uuid = storedUser.id;
 
-      // 2. Use the UUID in the URL instead of /me/
-      // Based on your urls.py, this calls ProfileView
       const response = await api.get(`/user/${uuid}/`);
 
       setUserData(response.data);
