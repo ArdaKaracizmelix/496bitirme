@@ -26,7 +26,6 @@ export default function ProfilePage() {
 
   const fetchProfileData = useCallback(async () => {
     try {
-      // 1. Get the stored profile object from AsyncStorage
       const storedUserRaw = await AsyncStorage.getItem("@excursa_user_profile");
 
       if (!storedUserRaw) {
@@ -103,9 +102,7 @@ export default function ProfilePage() {
         />
         <Text style={styles.name}>{userData?.full_name}</Text>
         <Text style={styles.username}>@{userData?.email?.split("@")[0]}</Text>
-        <Text style={styles.bio}>
-          {userData?.bio || "Keşfetmeye hazır! 🌍"}
-        </Text>
+        <Text style={styles.bio}>{userData?.bio || "Biyografi yok"}</Text>
 
         {/* Stats */}
         <View style={styles.statsRow}>

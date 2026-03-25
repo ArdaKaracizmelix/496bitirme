@@ -1,331 +1,303 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   TouchableOpacity,
   ActivityIndicator,
   SafeAreaView,
-  Pressable,
-  ScrollView
+  ScrollView,
+  Dimensions,
+  Animated,
+  StatusBar
 } from "react-native";
+import * as Haptics from "expo-haptics";
 import AuthManager from "../../services/AuthManager";
 import useAuthStore from "../../store/authStore";
 
-/**
- * InterestSelectionScreen
- * Allows users to select their interest categories/tags during onboarding
- */
-export default function InterestSelectionScreen({ navigation, route }) {
+const { width } = Dimensions.get("window");
+
+const CATEGORY_ASSETS = {
+  MUSEUM: { icon: "🏛️", color: "#E8F1FF", label: "Müzeler" },
+  PARK: { icon: "🌳", color: "#E8F5E9", label: "Doğa" },
+  RESTAURANT: { icon: "🍴", color: "#FFF3E0", label: "Gurme" },
+  CAFE: { icon: "☕", color: "#EFEBE9", label: "Kahve" },
+  HISTORIC: { icon: "🏰", color: "#F3E5F5", label: "Tarih" },
+  BEACH: { icon: "🏖️", color: "#E0F7FA", label: "Deniz" },
+  NIGHTLIFE: { icon: "✨", color: "#EDE7F6", label: "Eğlence" },
+  SHOPPING: { icon: "🛍️", color: "#FCE4EC", label: "Alışveriş" },
+  DEFAULT: { icon: "📍", color: "#F5F5F5", label: "Diğer" }
+};
+
+export default function InterestSelectionScreen({ navigation }) {
   const [availableTags, setAvailableTags] = useState([]);
   const [selectedTagIds, setSelectedTagIds] = useState(new Set());
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState("");
+
+  // Animasyon Değerleri
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
   const setAuth = useAuthStore((state) => state.setAuth);
 
-  const user = route.params?.user;
-
-  /**
-   * Fetch available interest tags from backend on component mount
-   */
   useEffect(() => {
     fetchInterests();
   }, []);
 
-  /**
-   * Fetches the list of available interest categories from the backend
-   */
+  // İlerleme çubuğu animasyonu
+  useEffect(() => {
+    const progress = Math.min(selectedTagIds.size / 3, 1);
+    Animated.timing(progressAnim, {
+      toValue: progress,
+      duration: 300,
+      useNativeDriver: false
+    }).start();
+  }, [selectedTagIds]);
+
   const fetchInterests = async () => {
-    setIsLoading(true);
-    setError("");
     try {
       const interests = await AuthManager.fetchAvailableInterests();
       setAvailableTags(interests);
+      // Veri gelince içeriği soldan sağa/aşağıdan yukarıya uçur
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true
+      }).start();
     } catch (err) {
-      const errorMsg =
-        err.response?.data?.detail ||
-        err.response?.data?.message ||
-        "İlgi alanları yüklenemedi. Lütfen tekrar dene.";
-      setError(errorMsg);
-      console.error("Failed to fetch interests:", err);
+      console.error(err);
     } finally {
       setIsLoading(false);
     }
   };
 
-  /**
-   * Toggles the selection state of an interest tag
-   */
   const toggleInterest = (id) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const newSelected = new Set(selectedTagIds);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
+    newSelected.has(id) ? newSelected.delete(id) : newSelected.add(id);
     setSelectedTagIds(newSelected);
-  };
-
-  /**
-   * Submits the selected interests to the backend and navigates to main app
-   */
-  const submitPreferences = async () => {
-    if (selectedTagIds.size === 0) {
-      setError("Lütfen en az bir ilgi alanı seçin.");
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError("");
-    try {
-      await AuthManager.submitInterestPreferences(Array.from(selectedTagIds));
-
-      // Update auth store with user info from AuthManager
-      const userProfile = AuthManager.userProfile;
-      const token = AuthManager.accessToken;
-
-      setAuth(userProfile, token);
-
-      // Navigation will be handled by AppNavigator when isAuthenticated changes
-    } catch (err) {
-      const errorMsg =
-        err.response?.data?.detail ||
-        err.response?.data?.message ||
-        "Tercihler kaydedilemedi. Lütfen tekrar dene.";
-      setError(errorMsg);
-      console.error("Failed to submit preferences:", err);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  /**
-   * Skip interest selection and proceed to main app
-   */
-  const skipSelection = () => {
-    // Update auth store with user info
-    const userProfile = AuthManager.userProfile;
-    const token = AuthManager.accessToken;
-
-    setAuth(userProfile, token);
   };
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1a1a2e" />
-          <Text style={styles.loadingText}>İlgi alanları yükleniyor...</Text>
-        </View>
-      </SafeAreaView>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#1a1a2e" />
+      </View>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+
+      {/* İlerleme Çubuğu */}
+      <View style={styles.progressBarBackground}>
+        <Animated.View
+          style={[
+            styles.progressBarFill,
+            {
+              width: progressAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: ["0%", "100%"]
+              })
+            }
+          ]}
+        />
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>İlgi Alanlarını Seç</Text>
-        <Text style={styles.subtitle}>
-          Soyahatini kişiselleştirmek için ilgi alanlarını seçin
-        </Text>
+        <Animated.View
+          style={[
+            styles.header,
+            {
+              opacity: fadeAnim,
+              transform: [
+                {
+                  translateY: fadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [20, 0]
+                  })
+                }
+              ]
+            }
+          ]}
+        >
+          <Text style={styles.title}>İlgi alanlarını seç</Text>
+          <Text style={styles.subtitle}>
+            Sana en uygun deneyimi hazırlamamız için{" "}
+            <Text style={styles.highlight}>en az 3 kategori</Text> seçmelisin.
+          </Text>
+        </Animated.View>
 
-        {error ? (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
+        <Animated.View style={[styles.grid, { opacity: fadeAnim }]}>
+          {availableTags.map((tag, index) => {
+            const isSelected = selectedTagIds.has(tag.id);
+            const asset = CATEGORY_ASSETS[tag.name] || CATEGORY_ASSETS.DEFAULT;
 
-        {/* Interest Tags Grid */}
-        <View style={styles.tagsContainer}>
-          {availableTags.map((tag) => (
-            <TouchableOpacity
-              key={tag.id}
-              style={[
-                styles.tagButton,
-                selectedTagIds.has(tag.id) && styles.tagButtonSelected
-              ]}
-              onPress={() => toggleInterest(tag.id)}
-              disabled={isSubmitting}
-            >
-              <Text
+            return (
+              <TouchableOpacity
+                key={tag.id}
+                activeOpacity={0.8}
+                onPress={() => toggleInterest(tag.id)}
                 style={[
-                  styles.tagText,
-                  selectedTagIds.has(tag.id) && styles.tagTextSelected
+                  styles.card,
+                  { backgroundColor: isSelected ? "#1a1a2e" : "#fff" },
+                  isSelected && styles.cardSelected
                 ]}
               >
-                {tag.name || tag.title}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Selected Count */}
-        <Text style={styles.selectionInfo}>
-          {selectedTagIds.size > 0
-            ? `${selectedTagIds.size} ilgi alanı seçildi`
-            : "Lütfen en az bir ilgi alanı seçin"}
-        </Text>
+                <View
+                  style={[
+                    styles.iconCircle,
+                    {
+                      backgroundColor: isSelected
+                        ? "rgba(255,255,255,0.2)"
+                        : asset.color
+                    }
+                  ]}
+                >
+                  <Text style={styles.cardIcon}>{asset.icon}</Text>
+                </View>
+                <Text
+                  style={[
+                    styles.cardText,
+                    isSelected && styles.cardTextSelected
+                  ]}
+                >
+                  {tag.title}
+                </Text>
+                {isSelected && (
+                  <View style={styles.checkBadge}>
+                    <Text style={styles.checkText}>✓</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </Animated.View>
       </ScrollView>
 
-      {/* Footer Buttons */}
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.skipButton, isSubmitting && styles.buttonDisabled]}
-          onPress={skipSelection}
-          disabled={isSubmitting}
-        >
-          <Text style={styles.skipButtonText}>Atla</Text>
-        </TouchableOpacity>
+        <View style={styles.footerContent}>
+          <Text style={styles.counterText}>
+            {selectedTagIds.size < 3
+              ? `${3 - selectedTagIds.size} tane daha seç`
+              : "Harika seçim!"}
+          </Text>
 
-        <TouchableOpacity
-          style={[
-            styles.submitButton,
-            (isSubmitting || selectedTagIds.size === 0) && styles.buttonDisabled
-          ]}
-          onPress={submitPreferences}
-          disabled={isSubmitting || selectedTagIds.size === 0}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={styles.submitButtonText}>Devam Et</Text>
-          )}
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.nextButton,
+              selectedTagIds.size < 3 && styles.buttonDisabled
+            ]}
+            disabled={selectedTagIds.size < 3}
+            onPress={() =>
+              setAuth(AuthManager.userProfile, AuthManager.accessToken)
+            }
+          >
+            <Text style={styles.nextButtonText}>Devam Et</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff"
+  container: { flex: 1, backgroundColor: "#F8F9FB" },
+  progressBarBackground: {
+    height: 6,
+    backgroundColor: "#E0E0E0",
+    width: "100%"
   },
-  scrollContent: {
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 120
-  },
+  progressBarFill: { height: 6, backgroundColor: "#4CAF50" },
+  scrollContent: { paddingHorizontal: 24, paddingTop: 40, paddingBottom: 120 },
+  header: { marginBottom: 40 },
   title: {
-    fontSize: 28,
-    fontWeight: "bold",
+    fontSize: 34,
+    fontWeight: "900",
     color: "#1a1a2e",
-    marginBottom: 12
+    letterSpacing: -1
   },
-  subtitle: {
-    fontSize: 16,
-    color: "#666",
-    marginBottom: 32,
-    lineHeight: 22
-  },
-  errorContainer: {
-    width: "100%",
-    backgroundColor: "#ffe6e6",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 24,
-    borderLeftWidth: 4,
-    borderLeftColor: "#cc0000"
-  },
-  errorText: {
-    color: "#cc0000",
-    fontSize: 14
-  },
-  tagsContainer: {
+  subtitle: { fontSize: 17, color: "#666", marginTop: 12, lineHeight: 24 },
+  highlight: { color: "#1a1a2e", fontWeight: "700" },
+  grid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 20
+    justifyContent: "space-between"
   },
-  tagButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 24,
-    borderWidth: 2,
-    borderColor: "#ddd",
-    backgroundColor: "#f9f9f9",
-    marginBottom: 8
-  },
-  tagButtonSelected: {
-    borderColor: "#1a1a2e",
-    backgroundColor: "#1a1a2e"
-  },
-  tagText: {
-    fontSize: 16,
-    color: "#1a1a2e",
-    fontWeight: "500"
-  },
-  tagTextSelected: {
-    color: "#fff"
-  },
-  selectionInfo: {
-    fontSize: 14,
-    color: "#666",
-    fontStyle: "italic",
-    textAlign: "center",
-    marginTop: 8
-  },
-  footer: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    padding: 24,
+  card: {
+    width: (width - 64) / 2,
+    height: 160,
+    borderRadius: 28,
+    padding: 20,
+    marginBottom: 16,
     backgroundColor: "#fff",
-    borderTopWidth: 1,
-    borderTopColor: "#eee",
-    gap: 12
-  },
-  skipButton: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#1a1a2e",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#fff"
-  },
-  skipButtonText: {
-    color: "#1a1a2e",
-    fontSize: 16,
-    fontWeight: "600"
-  },
-  submitButton: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#1a1a2e",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    // Shadow
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "#F0F0F0"
   },
-  submitButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600"
+  cardSelected: {
+    borderColor: "#1a1a2e",
+    transform: [{ scale: 0.98 }]
   },
-  buttonDisabled: {
-    opacity: 0.6
-  },
-  loadingContainer: {
-    flex: 1,
+  iconCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
     justifyContent: "center",
     alignItems: "center"
   },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: "#666"
-  }
+  cardIcon: { fontSize: 26 },
+  cardText: { fontSize: 17, fontWeight: "700", color: "#1a1a2e" },
+  cardTextSelected: { color: "#fff" },
+  checkBadge: {
+    position: "absolute",
+    top: 15,
+    right: 15,
+    backgroundColor: "#4CAF50",
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  checkText: { color: "#fff", fontSize: 12, fontWeight: "bold" },
+  footer: {
+    position: "absolute",
+    bottom: 0,
+    width: "100%",
+    padding: 24,
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 20
+  },
+  footerContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  counterText: { fontSize: 15, fontWeight: "600", color: "#666" },
+  nextButton: {
+    backgroundColor: "#1a1a2e",
+    paddingHorizontal: 35,
+    paddingVertical: 18,
+    borderRadius: 20
+  },
+  nextButtonText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+  buttonDisabled: { backgroundColor: "#E0E0E0" },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" }
 });
