@@ -10,6 +10,7 @@ services:
       POSTGRES_USER: excursa_user
       POSTGRES_PASSWORD: excursa_pass
       POSTGRES_INITDB_ARGS: "--locale=en_US.UTF-8"
+    
     ports:
       - "5433:5432"
     volumes:
@@ -21,7 +22,14 @@ services:
       retries: 5
     networks:
       - excursa_network
-
+  adminer:
+      image: adminer
+      container_name: excursa_adminer
+      restart: always
+      ports:
+        - "8080:8080"
+      networks:
+        - excursa_network
   mongo:
     image: mongo:latest
     container_name: excursa_mongo
@@ -89,3 +97,6 @@ volumes:
 networks:
   excursa_network:
     driver: bridge
+
+
+

@@ -1,15 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState } from "react";
 import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Pressable
-} from 'react-native';
-import AuthManager from '../../services/AuthManager';
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Pressable
+} from "react-native";
+import AuthManager from "../../services/AuthManager";
 
 export default function RegisterPage({ navigation }) {
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
 
@@ -28,27 +36,27 @@ export default function RegisterPage({ navigation }) {
     const errors = {};
 
     if (!fullName.trim()) {
-      errors.fullName = 'Ad Soyad gerekli';
+      errors.fullName = "Ad Soyad gerekli";
     } else if (fullName.trim().length < 2) {
-      errors.fullName = 'Ad Soyad en az 2 karakter olmalı';
+      errors.fullName = "Ad Soyad en az 2 karakter olmalı";
     }
 
     if (!email.trim()) {
-      errors.email = 'Email adresi gerekli';
+      errors.email = "Email adresi gerekli";
     } else if (!validateEmail(email)) {
-      errors.email = 'Geçerli bir email adresi girin';
+      errors.email = "Geçerli bir email adresi girin";
     }
 
     if (!password) {
-      errors.password = 'Şifre gerekli';
+      errors.password = "Şifre gerekli";
     } else if (password.length < 8) {
-      errors.password = 'Şifre en az 8 karakter olmalı';
+      errors.password = "Şifre en az 8 karakter olmalı";
     }
 
     if (!confirmPassword) {
-      errors.confirmPassword = 'Şifre tekrarı gerekli';
+      errors.confirmPassword = "Şifre tekrarı gerekli";
     } else if (password !== confirmPassword) {
-      errors.confirmPassword = 'Şifreler eşleşmiyor';
+      errors.confirmPassword = "Şifreler eşleşmiyor";
     }
 
     setValidationErrors(errors);
@@ -69,20 +77,36 @@ export default function RegisterPage({ navigation }) {
       const result = await AuthManager.register({
         fullName,
         email,
-        password,
+        password
       });
 
       // Navigate to Interest Selection after successful registration
-      navigation.navigate('InterestSelection', { user: result.user });
+      navigation.navigate("InterestSelection", { user: result.user });
     } catch (error) {
-      const errorMsg = error.response?.data?.detail ||
-                       error.response?.data?.message ||
-                       error.response?.data?.email?.[0] ||
-                       'Kayıt başarısız. Tekrar dene.';
-      
+      // Django rest framework hata mesajlarını parse edelim
+      const data = error.response?.data;
+      let errorMsg = "Kayıt başarısız. Tekrar dene.";
+
+      if (data) {
+        // 1. Eğer doğrudan şifre hatası varsa (Array formatında gelir)
+        if (data.password && Array.isArray(data.password)) {
+          errorMsg = data.password.join(" ");
+        }
+        // 2. Eğer email hatası varsa (Email zaten kayıtlı vb.)
+        else if (data.email && Array.isArray(data.email)) {
+          errorMsg = data.email.join(" ");
+        }
+        // 3. Genel detail veya message varsa
+        else if (data.detail) {
+          errorMsg = data.detail;
+        } else if (data.message) {
+          errorMsg = data.message;
+        }
+      }
+
       setValidationErrors({
         ...validationErrors,
-        general: errorMsg,
+        general: errorMsg
       });
     } finally {
       setIsLoading(false);
@@ -97,7 +121,7 @@ export default function RegisterPage({ navigation }) {
       fullName: setFullName,
       email: setEmail,
       password: setPassword,
-      confirmPassword: setConfirmPassword,
+      confirmPassword: setConfirmPassword
     };
 
     if (fieldSetters[field]) {
@@ -112,7 +136,7 @@ export default function RegisterPage({ navigation }) {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <ScrollView
         contentContainerStyle={styles.inner}
@@ -131,10 +155,13 @@ export default function RegisterPage({ navigation }) {
         {/* Full Name Input */}
         <View>
           <TextInput
-            style={[styles.input, validationErrors.fullName && styles.inputError]}
+            style={[
+              styles.input,
+              validationErrors.fullName && styles.inputError
+            ]}
             placeholder="Ad Soyad"
             value={fullName}
-            onChangeText={(text) => handleFieldChange('fullName', text)}
+            onChangeText={(text) => handleFieldChange("fullName", text)}
             autoCapitalize="words"
             editable={!isLoading}
             placeholderTextColor="#999"
@@ -150,7 +177,7 @@ export default function RegisterPage({ navigation }) {
             style={[styles.input, validationErrors.email && styles.inputError]}
             placeholder="Email"
             value={email}
-            onChangeText={(text) => handleFieldChange('email', text)}
+            onChangeText={(text) => handleFieldChange("email", text)}
             autoCapitalize="none"
             keyboardType="email-address"
             editable={!isLoading}
@@ -164,10 +191,13 @@ export default function RegisterPage({ navigation }) {
         {/* Password Input */}
         <View>
           <TextInput
-            style={[styles.input, validationErrors.password && styles.inputError]}
+            style={[
+              styles.input,
+              validationErrors.password && styles.inputError
+            ]}
             placeholder="Şifre"
             value={password}
-            onChangeText={(text) => handleFieldChange('password', text)}
+            onChangeText={(text) => handleFieldChange("password", text)}
             secureTextEntry
             editable={!isLoading}
             placeholderTextColor="#999"
@@ -180,16 +210,21 @@ export default function RegisterPage({ navigation }) {
         {/* Confirm Password Input */}
         <View>
           <TextInput
-            style={[styles.input, validationErrors.confirmPassword && styles.inputError]}
+            style={[
+              styles.input,
+              validationErrors.confirmPassword && styles.inputError
+            ]}
             placeholder="Şifre Tekrar"
             value={confirmPassword}
-            onChangeText={(text) => handleFieldChange('confirmPassword', text)}
+            onChangeText={(text) => handleFieldChange("confirmPassword", text)}
             secureTextEntry
             editable={!isLoading}
             placeholderTextColor="#999"
           />
           {validationErrors.confirmPassword ? (
-            <Text style={styles.fieldError}>{validationErrors.confirmPassword}</Text>
+            <Text style={styles.fieldError}>
+              {validationErrors.confirmPassword}
+            </Text>
           ) : null}
         </View>
 
@@ -207,7 +242,10 @@ export default function RegisterPage({ navigation }) {
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>Zaten hesabın var mı? </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Login')} disabled={isLoading}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate("Login")}
+            disabled={isLoading}
+          >
             <Text style={styles.link}>Giriş yap</Text>
           </TouchableOpacity>
         </View>
@@ -216,96 +254,95 @@ export default function RegisterPage({ navigation }) {
   );
 }
 
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff"
   },
   inner: {
     flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24
   },
   title: {
     fontSize: 36,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-    marginBottom: 8,
+    fontWeight: "bold",
+    color: "#1a1a2e",
+    marginBottom: 8
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
-    marginBottom: 40,
+    color: "#666",
+    marginBottom: 40
   },
   errorContainer: {
-    width: '100%',
-    backgroundColor: '#ffe6e6',
+    width: "100%",
+    backgroundColor: "#ffe6e6",
     borderRadius: 8,
     padding: 12,
     marginBottom: 20,
     borderLeftWidth: 4,
-    borderLeftColor: '#cc0000',
+    borderLeftColor: "#cc0000"
   },
   errorText: {
-    color: '#cc0000',
-    fontSize: 14,
+    color: "#cc0000",
+    fontSize: 14
   },
   input: {
-    width: '100%',
+    width: "100%",
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: "#ddd",
     borderRadius: 12,
     padding: 16,
     marginBottom: 8,
     fontSize: 16,
-    backgroundColor: '#f9f9f9',
+    backgroundColor: "#f9f9f9"
   },
   inputError: {
-    borderColor: '#cc0000',
+    borderColor: "#cc0000"
   },
   fieldError: {
-    color: '#cc0000',
+    color: "#cc0000",
     fontSize: 12,
     marginBottom: 12,
-    marginLeft: 4,
+    marginLeft: 4
   },
   button: {
-    width: '100%',
-    backgroundColor: '#1a1a2e',
+    width: "100%",
+    backgroundColor: "#1a1a2e",
     padding: 16,
     borderRadius: 12,
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 24,
     marginTop: 16,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 3
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.6
   },
   buttonText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600"
   },
   footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center"
   },
   footerText: {
-    color: '#666',
-    fontSize: 14,
+    color: "#666",
+    fontSize: 14
   },
   link: {
-    color: '#1a1a2e',
+    color: "#1a1a2e",
     fontSize: 14,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
+    fontWeight: "600",
+    textDecorationLine: "underline"
+  }
 });

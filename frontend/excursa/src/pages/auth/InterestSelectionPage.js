@@ -1,10 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, SafeAreaView, Pressable, ScrollView
-} from 'react-native';
-import AuthManager from '../../services/AuthManager';
-import useAuthStore from '../../store/authStore';
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  SafeAreaView,
+  Pressable,
+  ScrollView
+} from "react-native";
+import AuthManager from "../../services/AuthManager";
+import useAuthStore from "../../store/authStore";
 
 /**
  * InterestSelectionScreen
@@ -15,7 +22,7 @@ export default function InterestSelectionScreen({ navigation, route }) {
   const [selectedTagIds, setSelectedTagIds] = useState(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const setAuth = useAuthStore((state) => state.setAuth);
 
   const user = route.params?.user;
@@ -32,7 +39,7 @@ export default function InterestSelectionScreen({ navigation, route }) {
    */
   const fetchInterests = async () => {
     setIsLoading(true);
-    setError('');
+    setError("");
     try {
       const interests = await AuthManager.fetchAvailableInterests();
       setAvailableTags(interests);
@@ -40,9 +47,9 @@ export default function InterestSelectionScreen({ navigation, route }) {
       const errorMsg =
         err.response?.data?.detail ||
         err.response?.data?.message ||
-        'İlgi alanları yüklenemedi. Lütfen tekrar dene.';
+        "İlgi alanları yüklenemedi. Lütfen tekrar dene.";
       setError(errorMsg);
-      console.error('Failed to fetch interests:', err);
+      console.error("Failed to fetch interests:", err);
     } finally {
       setIsLoading(false);
     }
@@ -66,29 +73,29 @@ export default function InterestSelectionScreen({ navigation, route }) {
    */
   const submitPreferences = async () => {
     if (selectedTagIds.size === 0) {
-      setError('Lütfen en az bir ilgi alanı seçin.');
+      setError("Lütfen en az bir ilgi alanı seçin.");
       return;
     }
 
     setIsSubmitting(true);
-    setError('');
+    setError("");
     try {
       await AuthManager.submitInterestPreferences(Array.from(selectedTagIds));
-      
+
       // Update auth store with user info from AuthManager
       const userProfile = AuthManager.userProfile;
       const token = AuthManager.accessToken;
-      
+
       setAuth(userProfile, token);
-      
+
       // Navigation will be handled by AppNavigator when isAuthenticated changes
     } catch (err) {
       const errorMsg =
         err.response?.data?.detail ||
         err.response?.data?.message ||
-        'Tercihler kaydedilemedi. Lütfen tekrar dene.';
+        "Tercihler kaydedilemedi. Lütfen tekrar dene.";
       setError(errorMsg);
-      console.error('Failed to submit preferences:', err);
+      console.error("Failed to submit preferences:", err);
     } finally {
       setIsSubmitting(false);
     }
@@ -101,7 +108,7 @@ export default function InterestSelectionScreen({ navigation, route }) {
     // Update auth store with user info
     const userProfile = AuthManager.userProfile;
     const token = AuthManager.accessToken;
-    
+
     setAuth(userProfile, token);
   };
 
@@ -140,7 +147,7 @@ export default function InterestSelectionScreen({ navigation, route }) {
               key={tag.id}
               style={[
                 styles.tagButton,
-                selectedTagIds.has(tag.id) && styles.tagButtonSelected,
+                selectedTagIds.has(tag.id) && styles.tagButtonSelected
               ]}
               onPress={() => toggleInterest(tag.id)}
               disabled={isSubmitting}
@@ -148,7 +155,7 @@ export default function InterestSelectionScreen({ navigation, route }) {
               <Text
                 style={[
                   styles.tagText,
-                  selectedTagIds.has(tag.id) && styles.tagTextSelected,
+                  selectedTagIds.has(tag.id) && styles.tagTextSelected
                 ]}
               >
                 {tag.name || tag.title}
@@ -161,7 +168,7 @@ export default function InterestSelectionScreen({ navigation, route }) {
         <Text style={styles.selectionInfo}>
           {selectedTagIds.size > 0
             ? `${selectedTagIds.size} ilgi alanı seçildi`
-            : 'Lütfen en az bir ilgi alanı seçin'}
+            : "Lütfen en az bir ilgi alanı seçin"}
         </Text>
       </ScrollView>
 
@@ -178,7 +185,7 @@ export default function InterestSelectionScreen({ navigation, route }) {
         <TouchableOpacity
           style={[
             styles.submitButton,
-            (isSubmitting || selectedTagIds.size === 0) && styles.buttonDisabled,
+            (isSubmitting || selectedTagIds.size === 0) && styles.buttonDisabled
           ]}
           onPress={submitPreferences}
           disabled={isSubmitting || selectedTagIds.size === 0}
@@ -197,128 +204,128 @@ export default function InterestSelectionScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff"
   },
   scrollContent: {
     paddingHorizontal: 24,
     paddingTop: 32,
-    paddingBottom: 120,
+    paddingBottom: 120
   },
   title: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-    marginBottom: 12,
+    fontWeight: "bold",
+    color: "#1a1a2e",
+    marginBottom: 12
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
+    color: "#666",
     marginBottom: 32,
-    lineHeight: 22,
+    lineHeight: 22
   },
   errorContainer: {
-    width: '100%',
-    backgroundColor: '#ffe6e6',
+    width: "100%",
+    backgroundColor: "#ffe6e6",
     borderRadius: 8,
     padding: 12,
     marginBottom: 24,
     borderLeftWidth: 4,
-    borderLeftColor: '#cc0000',
+    borderLeftColor: "#cc0000"
   },
   errorText: {
-    color: '#cc0000',
-    fontSize: 14,
+    color: "#cc0000",
+    fontSize: 14
   },
   tagsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
-    marginBottom: 20,
+    marginBottom: 20
   },
   tagButton: {
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 24,
     borderWidth: 2,
-    borderColor: '#ddd',
-    backgroundColor: '#f9f9f9',
-    marginBottom: 8,
+    borderColor: "#ddd",
+    backgroundColor: "#f9f9f9",
+    marginBottom: 8
   },
   tagButtonSelected: {
-    borderColor: '#1a1a2e',
-    backgroundColor: '#1a1a2e',
+    borderColor: "#1a1a2e",
+    backgroundColor: "#1a1a2e"
   },
   tagText: {
     fontSize: 16,
-    color: '#1a1a2e',
-    fontWeight: '500',
+    color: "#1a1a2e",
+    fontWeight: "500"
   },
   tagTextSelected: {
-    color: '#fff',
+    color: "#fff"
   },
   selectionInfo: {
     fontSize: 14,
-    color: '#666',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginTop: 8,
+    color: "#666",
+    fontStyle: "italic",
+    textAlign: "center",
+    marginTop: 8
   },
   footer: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    flexDirection: 'row',
+    flexDirection: "row",
     padding: 24,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderTopWidth: 1,
-    borderTopColor: '#eee',
-    gap: 12,
+    borderTopColor: "#eee",
+    gap: 12
   },
   skipButton: {
     flex: 1,
     paddingVertical: 16,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#1a1a2e',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
+    borderColor: "#1a1a2e",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff"
   },
   skipButtonText: {
-    color: '#1a1a2e',
+    color: "#1a1a2e",
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600"
   },
   submitButton: {
     flex: 1,
     paddingVertical: 16,
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1a1a2e',
-    shadowColor: '#000',
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1a1a2e",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 3
   },
   submitButtonText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600"
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.6
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center"
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#666',
-  },
+    color: "#666"
+  }
 });

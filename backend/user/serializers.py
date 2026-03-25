@@ -42,23 +42,23 @@ class UserRegistrationSerializer(serializers.Serializer):
     def validate_full_name(self, value):
         full_name = value.strip()
         if not full_name:
-            raise serializers.ValidationError("Full name can not be empty")
+            raise serializers.ValidationError("İsim boş bırakılamaz")
         return full_name
 
     def validate_email(self, value):
         email = value.strip().lower()
         if User.objects.filter(email__iexact=email).exists():
-            raise serializers.ValidationError("Email already exists")
+            raise serializers.ValidationError("Email zaten kullanılıyor")
         return email
     
     def validate_password(self, value):
         if not re.search(r'[A-Z]', value):
             raise serializers.ValidationError(
-                "Password must contain at least one uppercase letter"
+                "Şifrede en az bir büyük harf olmalı."
             )
         if not re.search(r'[0-9]', value):
             raise serializers.ValidationError(
-                "Password must contain at least one number"
+                "Şifrede en az bir sayı olmalı."
             )
         return value
     
