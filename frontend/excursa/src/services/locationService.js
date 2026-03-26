@@ -179,8 +179,8 @@ export const locationService = {
     try {
       const response = await api.post('/trips/itinerary-items/', {
         itinerary: itineraryId,
-        poi: poiId,
-        order,
+        poi_id: poiId,
+        order_index: order,
       });
       return response.data;
     } catch (error) {
@@ -195,7 +195,7 @@ export const locationService = {
    */
   fetchUserItineraries: async () => {
     try {
-      const response = await api.get('/trips/itineraries/?status=DRAFT');
+      const response = await api.get('/trips/itineraries/');
       return response.data;
     } catch (error) {
       console.error('Error fetching itineraries:', error);

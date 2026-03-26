@@ -12,6 +12,8 @@ import SocialPage from '../pages/social/SocialPage';
 import ItineraryPage from '../pages/itinerary/ItineraryPage';
 import ChatbotPage from '../pages/chatbot/ChatbotPage';
 import ProfilePage from '../pages/social/ProfilePage';
+import SavedTripsScreen from '../screens/SavedTripsScreen';
+import IterinaryBuilderScreen from '../screens/IterinaryBuilderScreen';
 
 import useAuthStore from '../store/authStore';
 
@@ -43,6 +45,31 @@ function MapStack() {
   );
 }
 
+/**
+ * Trips/Itinerary Stack Navigator - Includes SavedTripsScreen and IterinaryBuilderScreen
+ */
+function TripsStack() {
+  return (
+    <Stack.Navigator 
+      screenOptions={{
+        headerShown: false,
+      }}
+    >
+      <Stack.Screen 
+        name="SavedTrips" 
+        component={SavedTripsScreen}
+      />
+      <Stack.Screen 
+        name="IterinaryBuilder" 
+        component={IterinaryBuilderScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+    </Stack.Navigator>
+  );
+}
+
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -65,8 +92,8 @@ function MainTabs() {
         }}
       />
       <Tab.Screen 
-        name="Itinerary" 
-        component={ItineraryPage}
+        name="Trips" 
+        component={TripsStack}
         options={{
           tabBarLabel: 'Rota',
         }}

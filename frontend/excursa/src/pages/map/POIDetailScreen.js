@@ -75,7 +75,10 @@ export default function POIDetailScreen({ route, navigation }) {
 
       // Fetch itineraries for "add to itinerary"
       const itinerariesData = await locationService.fetchUserItineraries();
-      setItineraries(itinerariesData.results || []);
+      const editableItineraries = (itinerariesData.results || []).filter(
+        (itinerary) => itinerary.status === 'DRAFT' || itinerary.status === 'ACTIVE'
+      );
+      setItineraries(editableItineraries);
     } catch (err) {
       console.error('Error fetching POI details:', err);
       setError('Failed to load details');
@@ -155,8 +158,10 @@ export default function POIDetailScreen({ route, navigation }) {
     }
 
     try {
-      // Get the next order number
-      const nextOrder = (selectedItinerary.stops?.length || 0) + 1;
+      // Use list serializer's total_stops when stops array is not available.
+      // order_index is zero-based, so next index equals current stop count.
+      const existingStops = selectedItinerary.total_stops ?? selectedItinerary.stops?.length ?? 0;
+      const nextOrder = existingStops;
       
       await locationService.addPOIToItinerary(
         selectedItinerary.id,
