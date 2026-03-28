@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'trips',
     'task_queue',
     'media_storage',
+    'ai_service',
     'corsheaders',
     'rest_framework_simplejwt',
 ]
