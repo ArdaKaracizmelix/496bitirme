@@ -8,12 +8,14 @@ import RegisterPage from '../pages/auth/RegisterPage';
 import InterestSelectionPage from '../pages/auth/InterestSelectionPage';
 import MapScreen from '../pages/map/MapScreen';
 import POIDetailScreen from '../pages/map/POIDetailScreen';
-import SocialPage from '../pages/social/SocialPage';
 import ItineraryPage from '../pages/itinerary/ItineraryPage';
 import ChatbotPage from '../pages/chatbot/ChatbotPage';
-import ProfilePage from '../pages/social/ProfilePage';
 import SavedTripsScreen from '../screens/SavedTripsScreen';
 import IterinaryBuilderScreen from '../screens/IterinaryBuilderScreen';
+import CommunityFeedScreen from '../screens/CommunityFeedScreen';
+import CreatePostScreen from '../screens/CreatePostScreen';
+import ProfileScreen from '../screens/ProfileScreen';
+import PostDetailScreen from '../screens/PostDetailScreen';
 
 import useAuthStore from '../store/authStore';
 
@@ -70,6 +72,63 @@ function TripsStack() {
   );
 }
 
+/**
+ * Social Stack Navigator - Includes CommunityFeedScreen, CreatePostScreen, and ProfileScreen
+ */
+function SocialStack() {
+  return (
+    <Stack.Navigator 
+      screenOptions={{
+        headerShown: false,
+      }}
+    >
+      <Stack.Screen 
+        name="CommunityFeed" 
+        component={CommunityFeedScreen}
+        options={{
+          title: 'Haberler',
+        }}
+      />
+      <Stack.Screen 
+        name="CreatePost" 
+        component={CreatePostScreen}
+        options={{
+          animationEnabled: true,
+          cardStyle: { backgroundColor: '#fff' },
+        }}
+      />
+      <Stack.Screen 
+        name="UserProfile" 
+        component={ProfileScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+      <Stack.Screen 
+        name="EditProfile" 
+        component={ProfileScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+      <Stack.Screen 
+        name="PostDetail" 
+        component={PostDetailScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+      <Stack.Screen 
+        name="EditPost" 
+        component={CreatePostScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+    </Stack.Navigator>
+  );
+}
+
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -86,7 +145,7 @@ function MainTabs() {
       />
       <Tab.Screen 
         name="Social" 
-        component={SocialPage}
+        component={SocialStack}
         options={{
           tabBarLabel: 'Sosyal',
         }}
@@ -107,7 +166,7 @@ function MainTabs() {
       />
       <Tab.Screen 
         name="Profile" 
-        component={ProfilePage}
+        component={ProfileScreen}
         options={{
           tabBarLabel: 'Profil',
         }}
