@@ -78,6 +78,18 @@ export const usePost = (postId) => {
 };
 
 /**
+ * Hook: Fetch user profile (current user or specific profile)
+ */
+export const useUserProfile = (userId, isOwnProfile = false) => {
+  return useQuery({
+    queryKey: ['userProfile', isOwnProfile ? 'me' : userId],
+    queryFn: () => SocialService.fetchUserProfile(isOwnProfile ? null : userId),
+    enabled: isOwnProfile || !!userId,
+    staleTime: 2 * 60 * 1000,
+  });
+};
+
+/**
  * Hook: Fetch posts from specific user (for profile)
  */
 export const useUserPosts = (userId) => {

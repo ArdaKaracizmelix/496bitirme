@@ -43,6 +43,16 @@ const api = axios.create({
 api.interceptors.request.use(async (config) => {
   config.headers = config.headers || {};
 
+  // Let axios/runtime set multipart boundaries for FormData payloads.
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    if (config.headers['Content-Type']) {
+      delete config.headers['Content-Type'];
+    }
+    if (config.headers['content-type']) {
+      delete config.headers['content-type'];
+    }
+  }
+
   if (config.skipAuth) {
     if (config.headers.Authorization) {
       delete config.headers.Authorization;

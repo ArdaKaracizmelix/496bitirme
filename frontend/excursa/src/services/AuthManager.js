@@ -48,7 +48,7 @@ class AuthManager {
   /**
    * Register new user
    * @param {Object} data - { full_name, email, password }
-   * @returns {Promise<{user: Object, access: String, refresh: String}>}
+   * @returns {Promise<{detail: String, email: String}>}
    */
   async register(data) {
     try {
@@ -57,13 +57,7 @@ class AuthManager {
         email: data.email,
         password: data.password,
       });
-
-      const { user, access, refresh } = response.data;
-
-      // Save session after registration
-      await this.saveSession({ user, access, refresh });
-
-      return { user, access, refresh };
+      return response.data;
     } catch (error) {
       throw error;
     }
@@ -84,6 +78,7 @@ class AuthManager {
       this.userProfile = {
         ...this.userProfile,
         interests: response.data.interests,
+        has_interests: true,
       };
 
       // Update stored user profile
@@ -106,6 +101,44 @@ class AuthManager {
     try {
       const response = await api.get('/user/interests/available/');
       return response.data.interests || response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch diagnostics for interest source (live Table A vs snapshot fallback).
+   * Temporary debug helper.
+   */
+  async fetchInterestSourceHealth() {
+    try {
+      const response = await api.get('/user/interests/health/');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Update current user's editable profile fields.
+   * @param {Object} data - { full_name?, bio?, avatar_url? }
+   * @returns {Promise<Object>} updated user payload
+   */
+  async updateProfile(data) {
+    try {
+      const response = await api.patch('/user/me/', data);
+      const updatedUser = response?.data?.user;
+      if (!updatedUser) {
+        throw new Error('Invalid profile update response');
+      }
+
+      this.userProfile = updatedUser;
+      await AsyncStorage.setItem(
+        AuthManager.STORAGE_KEY_USER,
+        JSON.stringify(updatedUser)
+      );
+
+      return updatedUser;
     } catch (error) {
       throw error;
     }

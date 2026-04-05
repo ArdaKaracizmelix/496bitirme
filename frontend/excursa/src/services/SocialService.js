@@ -58,6 +58,20 @@ class SocialService {
   }
 
   /**
+   * Fetch profile details for current or specific user.
+   */
+  async fetchUserProfile(userId = null) {
+    try {
+      const endpoint = userId ? `/user/${userId}/` : '/user/me/';
+      const response = await api.get(endpoint);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching profile${userId ? ` for user ${userId}` : ''}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Fetch posts from a specific user (for profile)
    */
   async fetchUserPosts(userId, limit = 10) {

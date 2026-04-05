@@ -72,7 +72,7 @@
             <p>{% trans "Click the button below to verify your email:" %}</p>
             
             <center>
-                <a href="https://excursa.com/api/user/verify-email?token={{ verification_token }}" class="button">
+                <a href="{{ verification_url }}" class="button">
                     {% trans "Verify Email" %}
                 </a>
             </center>

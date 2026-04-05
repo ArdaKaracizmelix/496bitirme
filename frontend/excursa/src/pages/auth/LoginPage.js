@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, Animated
@@ -6,13 +6,19 @@ import {
 import useAuthStore from '../../store/authStore';
 import AuthManager from '../../services/AuthManager';
 
-export default function LoginPage({ navigation }) {
-  const [email, setEmail] = useState('');
+export default function LoginPage({ navigation, route }) {
+  const [email, setEmail] = useState(route?.params?.email || '');
   const [password, setPassword] = useState('');
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const setAuth = useAuthStore((state) => state.setAuth);
+
+  useEffect(() => {
+    if (route?.params?.email) {
+      setEmail(route.params.email);
+    }
+  }, [route?.params?.email]);
 
   /**
    * Validates email format using regex

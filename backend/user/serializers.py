@@ -76,6 +76,7 @@ class UserRegistrationSerializer(serializers.Serializer):
             email=email,
             first_name=first_name,
             last_name=last_name,
-            password=password
+            password=password,
+            is_active=False,
         )
         return user

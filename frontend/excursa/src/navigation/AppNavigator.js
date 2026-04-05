@@ -16,6 +16,7 @@ import CommunityFeedScreen from '../screens/CommunityFeedScreen';
 import CreatePostScreen from '../screens/CreatePostScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import PostDetailScreen from '../screens/PostDetailScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
 
 import useAuthStore from '../store/authStore';
 
@@ -72,6 +73,35 @@ function TripsStack() {
   );
 }
 
+function ProfileStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+      }}
+    >
+      <Stack.Screen
+        name="ProfileHome"
+        component={ProfileScreen}
+      />
+      <Stack.Screen
+        name="EditProfile"
+        component={EditProfileScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="InterestSelection"
+        component={InterestSelectionPage}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+    </Stack.Navigator>
+  );
+}
+
 /**
  * Social Stack Navigator - Includes CommunityFeedScreen, CreatePostScreen, and ProfileScreen
  */
@@ -106,7 +136,14 @@ function SocialStack() {
       />
       <Stack.Screen 
         name="EditProfile" 
-        component={ProfileScreen}
+        component={EditProfileScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+      <Stack.Screen 
+        name="InterestSelection" 
+        component={InterestSelectionPage}
         options={{
           animationEnabled: true,
         }}
@@ -166,7 +203,7 @@ function MainTabs() {
       />
       <Tab.Screen 
         name="Profile" 
-        component={ProfileScreen}
+        component={ProfileStack}
         options={{
           tabBarLabel: 'Profil',
         }}
@@ -198,11 +235,31 @@ function AuthStack() {
         }}
       />
       <Stack.Screen 
-        name="InterestSelection" 
+        name="InterestSelection"
         component={InterestSelectionPage}
         options={{
           cardStyle: { backgroundColor: '#fff' },
-          gestureEnabled: false, // Prevent swiping back
+          gestureEnabled: false,
+        }}
+      />
+    </Stack.Navigator>
+  );
+}
+
+function OnboardingStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+        animationEnabled: true,
+      }}
+    >
+      <Stack.Screen
+        name="InterestSelection"
+        component={InterestSelectionPage}
+        options={{
+          cardStyle: { backgroundColor: '#fff' },
+          gestureEnabled: false,
         }}
       />
     </Stack.Navigator>
@@ -211,10 +268,12 @@ function AuthStack() {
 
 export default function AppNavigator() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const user = useAuthStore((state) => state.user);
+  const needsInterests = isAuthenticated && user?.has_interests === false;
 
   return (
     <NavigationContainer>
-      {isAuthenticated ? <MainTabs /> : <AuthStack />}
+      {isAuthenticated ? (needsInterests ? <OnboardingStack /> : <MainTabs />) : <AuthStack />}
     </NavigationContainer>
   );
 }

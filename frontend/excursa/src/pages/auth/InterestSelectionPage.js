@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, SafeAreaView, Pressable, ScrollView
+  View, Text, StyleSheet, TouchableOpacity,
+  ActivityIndicator, SafeAreaView, ScrollView
 } from 'react-native';
 import AuthManager from '../../services/AuthManager';
 import useAuthStore from '../../store/authStore';
@@ -10,21 +10,26 @@ import useAuthStore from '../../store/authStore';
  * InterestSelectionScreen
  * Allows users to select their interest categories/tags during onboarding
  */
-export default function InterestSelectionScreen({ navigation, route }) {
+export default function InterestSelectionScreen({ route, navigation }) {
   const [availableTags, setAvailableTags] = useState([]);
   const [selectedTagIds, setSelectedTagIds] = useState(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [healthData, setHealthData] = useState(null);
+  const [healthError, setHealthError] = useState('');
+  const [isHealthLoading, setIsHealthLoading] = useState(false);
   const setAuth = useAuthStore((state) => state.setAuth);
-
-  const user = route.params?.user;
+  const isEditMode = route?.params?.mode === 'edit';
 
   /**
    * Fetch available interest tags from backend on component mount
    */
   useEffect(() => {
     fetchInterests();
+    if (isEditMode) {
+      fetchHealth();
+    }
   }, []);
 
   /**
@@ -36,6 +41,21 @@ export default function InterestSelectionScreen({ navigation, route }) {
     try {
       const interests = await AuthManager.fetchAvailableInterests();
       setAvailableTags(interests);
+
+      if (isEditMode) {
+        const existingInterests = AuthManager.userProfile?.interests || [];
+        const existingNames = new Set(
+          existingInterests.map((item) => {
+            if (typeof item === 'string') return item.toUpperCase();
+            if (item?.name) return String(item.name).toUpperCase();
+            return '';
+          }).filter(Boolean)
+        );
+        const presetIds = interests
+          .filter((tag) => existingNames.has(String(tag.name || '').toUpperCase()))
+          .map((tag) => tag.id);
+        setSelectedTagIds(new Set(presetIds));
+      }
     } catch (err) {
       const errorMsg =
         err.response?.data?.detail ||
@@ -45,6 +65,24 @@ export default function InterestSelectionScreen({ navigation, route }) {
       console.error('Failed to fetch interests:', err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchHealth = async () => {
+    setIsHealthLoading(true);
+    setHealthError('');
+    try {
+      const health = await AuthManager.fetchInterestSourceHealth();
+      setHealthData(health);
+    } catch (err) {
+      const msg =
+        err.response?.data?.detail ||
+        err.response?.data?.message ||
+        err.message ||
+        'Health verisi alınamadı.';
+      setHealthError(msg);
+    } finally {
+      setIsHealthLoading(false);
     }
   };
 
@@ -80,8 +118,9 @@ export default function InterestSelectionScreen({ navigation, route }) {
       const token = AuthManager.accessToken;
       
       setAuth(userProfile, token);
-      
-      // Navigation will be handled by AppNavigator when isAuthenticated changes
+      if (isEditMode) {
+        navigation.goBack();
+      }
     } catch (err) {
       const errorMsg =
         err.response?.data?.detail ||
@@ -92,17 +131,6 @@ export default function InterestSelectionScreen({ navigation, route }) {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  /**
-   * Skip interest selection and proceed to main app
-   */
-  const skipSelection = () => {
-    // Update auth store with user info
-    const userProfile = AuthManager.userProfile;
-    const token = AuthManager.accessToken;
-    
-    setAuth(userProfile, token);
   };
 
   if (isLoading) {
@@ -124,12 +152,37 @@ export default function InterestSelectionScreen({ navigation, route }) {
       >
         <Text style={styles.title}>İlgi Alanlarını Seç</Text>
         <Text style={styles.subtitle}>
-          Soyahatini kişiselleştirmek için ilgi alanlarını seçin
+          {isEditMode
+            ? 'İlgi alanlarını güncelle'
+            : 'Seyahatini kişiselleştirmek için ilgi alanlarını seçin'}
         </Text>
 
         {error ? (
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        {isEditMode ? (
+          <View style={styles.debugCard}>
+            <View style={styles.debugHeader}>
+              <Text style={styles.debugTitle}>Interest Source Debug</Text>
+              <TouchableOpacity
+                style={styles.debugRefresh}
+                onPress={fetchHealth}
+                disabled={isHealthLoading}
+              >
+                <Text style={styles.debugRefreshText}>
+                  {isHealthLoading ? 'Yükleniyor...' : 'Yenile'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {healthError ? <Text style={styles.debugError}>{healthError}</Text> : null}
+            {healthData ? (
+              <Text style={styles.debugText}>{JSON.stringify(healthData, null, 2)}</Text>
+            ) : (
+              <Text style={styles.debugText}>No data</Text>
+            )}
           </View>
         ) : null}
 
@@ -151,7 +204,7 @@ export default function InterestSelectionScreen({ navigation, route }) {
                   selectedTagIds.has(tag.id) && styles.tagTextSelected,
                 ]}
               >
-                {tag.name || tag.title}
+                {tag.title || tag.name}
               </Text>
             </TouchableOpacity>
           ))}
@@ -165,16 +218,8 @@ export default function InterestSelectionScreen({ navigation, route }) {
         </Text>
       </ScrollView>
 
-      {/* Footer Buttons */}
+      {/* Footer */}
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.skipButton, isSubmitting && styles.buttonDisabled]}
-          onPress={skipSelection}
-          disabled={isSubmitting}
-        >
-          <Text style={styles.skipButtonText}>Atla</Text>
-        </TouchableOpacity>
-
         <TouchableOpacity
           style={[
             styles.submitButton,
@@ -186,7 +231,7 @@ export default function InterestSelectionScreen({ navigation, route }) {
           {isSubmitting ? (
             <ActivityIndicator color="#fff" size="small" />
           ) : (
-            <Text style={styles.submitButtonText}>Devam Et</Text>
+            <Text style={styles.submitButtonText}>{isEditMode ? 'Kaydet' : 'Devam Et'}</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -229,6 +274,48 @@ const styles = StyleSheet.create({
     color: '#cc0000',
     fontSize: 14,
   },
+  debugCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#d9d9d9',
+    borderRadius: 10,
+    backgroundColor: '#fafafa',
+    padding: 12,
+    marginBottom: 20,
+  },
+  debugHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  debugTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#222',
+  },
+  debugRefresh: {
+    borderWidth: 1,
+    borderColor: '#1a1a2e',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  debugRefreshText: {
+    color: '#1a1a2e',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  debugText: {
+    fontSize: 11,
+    color: '#333',
+    lineHeight: 16,
+  },
+  debugError: {
+    fontSize: 12,
+    color: '#cc0000',
+    marginBottom: 6,
+  },
   tagsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -268,30 +355,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    flexDirection: 'row',
     padding: 24,
     backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#eee',
-    gap: 12,
-  },
-  skipButton: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#1a1a2e',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-  },
-  skipButtonText: {
-    color: '#1a1a2e',
-    fontSize: 16,
-    fontWeight: '600',
+    borderTopColor: '#eee'
   },
   submitButton: {
-    flex: 1,
+    width: '100%',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',

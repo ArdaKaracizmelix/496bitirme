@@ -87,7 +87,6 @@ class StorageService:
                 self.bucket_name,
                 s3_key,
                 ExtraArgs={
-                    'ACL': 'public-read',
                     'ContentType': file_obj.content_type
                 }
             )

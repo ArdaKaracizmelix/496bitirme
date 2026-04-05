@@ -13,7 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useUserPosts } from '../hooks/useSocial';
+import { useUserPosts, useUserProfile } from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
 
 const screenWidth = Dimensions.get('window').width;
@@ -38,32 +38,39 @@ export default function ProfileScreen({ route }) {
   const isOwnProfile = !routeUserId || routeUserId === currentUserId;
   const userId = routeUserId || currentUserId;
 
-  // Mock user data for demonstration
-  const userProfile = {
-    id: userId,
-    full_name: isOwnProfile
-      ? (currentUser?.full_name || 'Kullanıcı Adı')
-      : (routeParams.full_name || routeParams.user_name || 'Kullanıcı'),
-    avatar_url: isOwnProfile
-      ? (currentUser?.avatar_url || 'https://i.pravatar.cc/150?img=1')
-      : (routeParams.avatar_url || 'https://i.pravatar.cc/150?img=1'),
-    bio: routeParams.bio || 'Gezginlik aşkıyla yaşayan biri 🌍✈️',
-    followers_count: routeParams.followers_count || 234,
-    following_count: routeParams.following_count || 567,
-    stats: {
-      countries: 12,
-      cities: 45,
-      km_traveled: 15420,
-    },
-  };
+  const {
+    data: profileData,
+    isLoading: isProfileLoading,
+    isError: isProfileError,
+    refetch: refetchProfile,
+  } = useUserProfile(userId, isOwnProfile);
 
   // Fetch user posts
-  const { data: postsData, isLoading, isError, refetch } = useUserPosts(userId);
+  const {
+    data: postsData,
+    isLoading: isPostsLoading,
+    isError: isPostsError,
+    refetch: refetchPosts,
+  } = useUserPosts(userId);
 
   const [activeTab, setActiveTab] = useState('grid'); // 'grid' or 'map'
   const [isFollowing, setIsFollowing] = useState(false);
 
   const posts = postsData?.results || [];
+  const postsCount = postsData?.count ?? posts.length;
+  const isLoading = isProfileLoading || isPostsLoading;
+  const isError = isProfileError || isPostsError;
+
+  const userProfile = {
+    id: userId,
+    full_name: isOwnProfile
+      ? (currentUser?.full_name || profileData?.username || profileData?.email || 'Kullanıcı')
+      : (routeParams.full_name || routeParams.user_name || profileData?.username || profileData?.email || 'Kullanıcı'),
+    avatar_url: profileData?.avatar_url || routeParams.avatar_url || currentUser?.avatar_url || 'https://i.pravatar.cc/150?img=1',
+    bio: profileData?.bio ?? routeParams.bio ?? currentUser?.bio ?? '',
+    followers_count: profileData?.followers_count ?? currentUser?.followers_count ?? routeParams.followers_count ?? 0,
+    following_count: profileData?.following_count ?? currentUser?.following_count ?? routeParams.following_count ?? 0,
+  };
 
   const handleLogout = () => {
     const runLogout = async () => {
@@ -102,10 +109,7 @@ export default function ProfileScreen({ route }) {
    * Handle follow/unfollow
    */
   const handleFollowToggle = async () => {
-    if (isOwnProfile) {
-      navigation.navigate('EditProfile');
-      return;
-    }
+    if (isOwnProfile) return;
 
     try {
       setIsFollowing(!isFollowing);
@@ -141,7 +145,7 @@ export default function ProfileScreen({ route }) {
         <Image source={{ uri: userProfile.avatar_url }} style={styles.profileAvatar} />
         <View style={styles.statsContainer}>
           <View style={styles.stat}>
-            <Text style={styles.statNumber}>{posts.length}</Text>
+            <Text style={styles.statNumber}>{postsCount}</Text>
             <Text style={styles.statLabel}>Gönderi</Text>
           </View>
           <View style={styles.stat}>
@@ -157,25 +161,25 @@ export default function ProfileScreen({ route }) {
 
       {/* Profile Info */}
       <View style={styles.infoSection}>
-        <Text style={styles.profileName}>{userProfile.full_name}</Text>
-        <Text style={styles.profileBio}>{userProfile.bio}</Text>
+          <Text style={styles.profileName}>{userProfile.full_name}</Text>
+        {!!userProfile.bio && <Text style={styles.profileBio}>{userProfile.bio}</Text>}
       </View>
 
       {/* Travel Stats */}
       <View style={styles.travelStats}>
         <View style={styles.statBox}>
           <Text style={styles.statBoxIcon}>🌍</Text>
-          <Text style={styles.statBoxValue}>{userProfile.stats.countries}</Text>
+          <Text style={styles.statBoxValue}>-</Text>
           <Text style={styles.statBoxLabel}>Ülke</Text>
         </View>
         <View style={styles.statBox}>
           <Text style={styles.statBoxIcon}>🏙️</Text>
-          <Text style={styles.statBoxValue}>{userProfile.stats.cities}</Text>
+          <Text style={styles.statBoxValue}>-</Text>
           <Text style={styles.statBoxLabel}>Şehir</Text>
         </View>
         <View style={styles.statBox}>
           <Text style={styles.statBoxIcon}>✈️</Text>
-          <Text style={styles.statBoxValue}>{(userProfile.stats.km_traveled / 1000).toFixed(1)}K</Text>
+          <Text style={styles.statBoxValue}>-</Text>
           <Text style={styles.statBoxLabel}>Km</Text>
         </View>
       </View>
@@ -319,7 +323,13 @@ export default function ProfileScreen({ route }) {
         {renderHeader()}
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>Veriler yüklenemedi</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              refetchProfile();
+              refetchPosts();
+            }}
+          >
             <Text style={styles.retryButtonText}>Tekrar Deneyin</Text>
           </TouchableOpacity>
         </View>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Pressable
+  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView
 } from 'react-native';
 import AuthManager from '../../services/AuthManager';
 
@@ -12,6 +12,7 @@ export default function RegisterPage({ navigation }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
+  const [successMessage, setSuccessMessage] = useState('');
 
   /**
    * Validates email format using regex
@@ -65,6 +66,7 @@ export default function RegisterPage({ navigation }) {
     }
 
     setIsLoading(true);
+    setSuccessMessage('');
     try {
       const result = await AuthManager.register({
         fullName,
@@ -72,8 +74,11 @@ export default function RegisterPage({ navigation }) {
         password,
       });
 
-      // Navigate to Interest Selection after successful registration
-      navigation.navigate('InterestSelection', { user: result.user });
+      setValidationErrors({});
+      setSuccessMessage(
+        result.detail || 'Doğrulama emaili gönderildi. Lütfen emailini doğrula ve giriş yap.'
+      );
+      navigation.navigate('Login', { email });
     } catch (error) {
       const errorMsg = error.response?.data?.detail ||
                        error.response?.data?.message ||
@@ -84,6 +89,7 @@ export default function RegisterPage({ navigation }) {
         ...validationErrors,
         general: errorMsg,
       });
+      setSuccessMessage('');
     } finally {
       setIsLoading(false);
     }
@@ -125,6 +131,12 @@ export default function RegisterPage({ navigation }) {
         {validationErrors.general ? (
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>{validationErrors.general}</Text>
+          </View>
+        ) : null}
+
+        {successMessage ? (
+          <View style={styles.successContainer}>
+            <Text style={styles.successText}>{successMessage}</Text>
           </View>
         ) : null}
 
@@ -250,6 +262,19 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: '#cc0000',
+    fontSize: 14,
+  },
+  successContainer: {
+    width: '100%',
+    backgroundColor: '#e7f8ec',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#1f8a4c',
+  },
+  successText: {
+    color: '#1f8a4c',
     fontSize: 14,
   },
   input: {
