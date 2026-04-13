@@ -7,8 +7,10 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { Platform, PermissionsAndroid } from 'react-native';
 import locationService from '../services/locationService';
 import { getViewportBounds, clusterMarkers, isValidCoordinates } from '../utils/mapUtils';
+import useAuthStore from '../store/authStore';
 
 export const useMapController = () => {
+  const user = useAuthStore((state) => state.user);
   // State for location and POI data
   const [displayedMarkers, setDisplayedMarkers] = useState([]);
   const [selectedPOI, setSelectedPOI] = useState(null);
@@ -24,6 +26,7 @@ export const useMapController = () => {
   const [activeFilters, setActiveFilters] = useState({
     category: null,
     minRating: 0,
+    interestsOnly: false,
   });
 
   // State for loading and errors
@@ -34,6 +37,8 @@ export const useMapController = () => {
   const lastFetchRegion = useRef(null);
   const fetchDebounceTimer = useRef(null);
   const inFlightRequestKey = useRef(null);
+  const dataModeRef = useRef('nearby'); // 'nearby' | 'search'
+  const requestSequenceRef = useRef(0);
 
   /**
    * Check if distance moved is significant enough to warrant new API call
@@ -102,15 +107,20 @@ export const useMapController = () => {
    * @param {number} radius - Search radius in meters
    */
   const fetchNearbyPlaces = useCallback(
-    async (region = currentRegion, radius = 5000) => {
+    async (region = currentRegion, radius = 5000, filterOverrides = null, options = {}) => {
+      const { force = false } = options;
       // Validate coordinates
       if (!isValidCoordinates(region.latitude, region.longitude)) {
         setError('Invalid coordinates');
         return;
       }
 
+      if (!force && dataModeRef.current === 'search') {
+        return;
+      }
+
       // Check if movement is significant
-      if (!hasMovedSignificantly(region)) {
+      if (!force && !hasMovedSignificantly(region)) {
         return;
       }
 
@@ -119,12 +129,22 @@ export const useMapController = () => {
 
       try {
         // Prepare filters
+        const userInterests = Array.isArray(user?.interests)
+          ? user.interests.filter((item) => typeof item === 'string' && item.trim().length > 0)
+          : [];
+        const effectiveFilters = filterOverrides || activeFilters;
         const filters = {};
-        if (activeFilters.category) {
-          filters.category = activeFilters.category;
+        if (effectiveFilters.category) {
+          filters.category = effectiveFilters.category;
         }
-        if (activeFilters.minRating > 0) {
-          filters.min_rating = activeFilters.minRating;
+        if (effectiveFilters.minRating > 0) {
+          filters.min_rating = effectiveFilters.minRating;
+        }
+        if (effectiveFilters.interestsOnly) {
+          filters.interests_only = true;
+        }
+        if (userInterests.length > 0) {
+          filters.interests = userInterests;
         }
 
         // Prevent duplicate in-flight requests for the exact same query.
@@ -134,12 +154,15 @@ export const useMapController = () => {
           radius,
           category: filters.category || null,
           min_rating: filters.min_rating || 0,
+          interests_only: !!filters.interests_only,
+          interests: (filters.interests || []).slice().sort(),
         });
         if (inFlightRequestKey.current === requestKey) {
           setIsFetching(false);
           return;
         }
         inFlightRequestKey.current = requestKey;
+        const requestId = ++requestSequenceRef.current;
 
         // Fetch from API
         let response = await locationService.fetchNearbyPOIs(
@@ -159,15 +182,15 @@ export const useMapController = () => {
           );
         }
 
-        // If still empty, show the generic list so map is not blank.
-        if ((response.results || []).length === 0) {
-          response = await locationService.fetchPOIsList();
+        if (requestId !== requestSequenceRef.current || dataModeRef.current !== 'nearby') {
+          return;
         }
 
         // Cluster markers if there are many
         let markers = response.results || [];
+        const zoomLevel = regionToZoom(region);
         if (markers.length > 50) {
-          const clustered = clusterMarkers(markers, 13); // Assume reasonable zoom
+          const clustered = clusterMarkers(markers, zoomLevel);
           setDisplayedMarkers(clustered);
         } else {
           setDisplayedMarkers(markers.map((poi) => ({ ...poi, type: 'marker' })));
@@ -194,7 +217,7 @@ export const useMapController = () => {
         setIsFetching(false);
       }
     },
-    [currentRegion, activeFilters, hasMovedSignificantly]
+    [currentRegion, activeFilters, hasMovedSignificantly, user]
   );
 
   /**
@@ -212,7 +235,9 @@ export const useMapController = () => {
       }
 
       fetchDebounceTimer.current = setTimeout(() => {
-        fetchNearbyPlaces(region);
+        if (dataModeRef.current === 'nearby') {
+          fetchNearbyPlaces(region);
+        }
       }, 500);
     },
     [fetchNearbyPlaces]
@@ -240,7 +265,7 @@ export const useMapController = () => {
         longitudeDelta: 0.05,
       };
       setCurrentRegion(newRegion);
-      fetchNearbyPlaces(newRegion);
+      fetchNearbyPlaces(newRegion, 5000, null, { force: true });
     }
   }, [fetchNearbyPlaces]);
 
@@ -249,26 +274,35 @@ export const useMapController = () => {
    * @param {string} query - Search query
    */
   const handleSearch = useCallback(async (query) => {
-    setSearchQuery(query);
+    const normalizedQuery = String(query || '').trim();
+    setSearchQuery(normalizedQuery);
 
-    if (!query.trim()) {
-      setDisplayedMarkers([]);
+    if (!normalizedQuery) {
+      dataModeRef.current = 'nearby';
+      // Restore nearby markers when search is cleared.
+      fetchNearbyPlaces(currentRegion, 5000, null, { force: true });
       return;
     }
 
+    dataModeRef.current = 'search';
     setIsFetching(true);
     setError(null);
+    const requestId = ++requestSequenceRef.current;
 
     try {
-      const response = await locationService.searchPOIs(query);
-      setDisplayedMarkers(response.results || []);
+      const response = await locationService.searchPOIs(normalizedQuery);
+      if (requestId !== requestSequenceRef.current || dataModeRef.current !== 'search') {
+        return;
+      }
+      const markers = (response.results || []).map((poi) => ({ ...poi, type: 'marker' }));
+      setDisplayedMarkers(markers);
     } catch (err) {
       console.error('Error searching:', err);
       setError('Search failed');
     } finally {
       setIsFetching(false);
     }
-  }, []);
+  }, [fetchNearbyPlaces, currentRegion]);
 
   /**
    * Update active filters
@@ -276,20 +310,23 @@ export const useMapController = () => {
    */
   const updateFilters = useCallback(
     (filters) => {
-      setActiveFilters((prev) => ({ ...prev, ...filters }));
+      const nextFilters = { ...activeFilters, ...filters };
+      setActiveFilters(nextFilters);
       // Re-fetch with new filters
-      fetchNearbyPlaces(currentRegion);
+      fetchNearbyPlaces(currentRegion, 5000, nextFilters);
     },
-    [currentRegion, fetchNearbyPlaces]
+    [currentRegion, fetchNearbyPlaces, activeFilters]
   );
 
   /**
    * Clear all filters and reset display
    */
   const clearFilters = useCallback(() => {
-    setActiveFilters({ category: null, minRating: 0 });
+    const resetFilters = { category: null, minRating: 0, interestsOnly: false };
+    setActiveFilters(resetFilters);
     setSearchQuery('');
-    fetchNearbyPlaces(currentRegion);
+    dataModeRef.current = 'nearby';
+    fetchNearbyPlaces(currentRegion, 5000, resetFilters, { force: true });
   }, [currentRegion, fetchNearbyPlaces]);
 
   /**
@@ -354,3 +391,10 @@ export const useMapController = () => {
 };
 
 export default useMapController;
+  const regionToZoom = (region) => {
+    if (typeof region?.zoomLevel === 'number' && Number.isFinite(region.zoomLevel)) {
+      return Math.max(2, Math.min(18, Math.round(region.zoomLevel)));
+    }
+    const latDelta = Number(region?.latitudeDelta) || 0.1;
+    return Math.max(2, Math.min(18, Math.round(Math.log2(360 / Math.max(latDelta, 0.0001)))));
+  };

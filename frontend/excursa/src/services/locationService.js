@@ -3,6 +3,7 @@
  * Handles interaction with the backend locations, recommendations, and trips APIs
  */
 
+import axios from 'axios';
 import api from './api';
 
 export const locationService = {
@@ -28,6 +29,12 @@ export const locationService = {
       }
       if (filters.min_rating) {
         params.append('min_rating', filters.min_rating.toString());
+      }
+      if (Array.isArray(filters.interests) && filters.interests.length > 0) {
+        params.append('interests', filters.interests.join(','));
+      }
+      if (filters.interests_only) {
+        params.append('interests_only', 'true');
       }
 
       const response = await api.get(`/locations/pois/nearby/?${params}`, {
@@ -76,6 +83,83 @@ export const locationService = {
       return response.data;
     } catch (error) {
       console.error('Error fetching POI list:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Fetch available city list inferred from POI data
+   * @param {string} query - Optional text query for autocomplete
+   * @returns {Promise<Array<string>>}
+   */
+  fetchAvailableCities: async (query = '') => {
+    const typed = String(query || '').trim();
+    if (typed.length < 2) return [];
+
+    // Primary: global city search (dynamic, worldwide, not fixed local list)
+    try {
+      const external = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
+        params: {
+          name: typed,
+          count: 10,
+          language: 'en',
+          format: 'json',
+        },
+        timeout: 7000,
+      });
+
+      const results = Array.isArray(external?.data?.results) ? external.data.results : [];
+      const names = [];
+      const seen = new Set();
+      for (const item of results) {
+        const name = String(item?.name || '').trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        names.push(name);
+      }
+      if (names.length > 0) {
+        return names;
+      }
+    } catch (error) {
+      // Silent fallback to backend endpoint.
+    }
+
+    // Fallback: backend city suggestions
+    try {
+      const params = new URLSearchParams();
+      params.append('q', typed);
+      const path = params.toString()
+        ? `/locations/pois/cities/?${params.toString()}`
+        : '/locations/pois/cities/';
+      const response = await api.get(path, {
+        skipAuth: true,
+      });
+      return response.data?.results || [];
+    } catch (error) {
+      console.error('Error fetching available cities:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Trigger POI generation/sync for a city and return generated nearby POIs.
+   * Uses backend's external sync pipeline (Google Places integration).
+   * @param {string} city
+   * @param {Array<string>} interests
+   * @param {number} radius
+   */
+  generatePOIsForCity: async (city, interests = [], radius = 20000) => {
+    try {
+      const response = await api.post('/locations/pois/generate_for_city/', {
+        city,
+        interests,
+        radius,
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error generating POIs for city:', error);
       throw error;
     }
   },

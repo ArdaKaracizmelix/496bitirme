@@ -2,8 +2,11 @@
 API views for locations app endpoints.
 """
 import logging
+import re
 import threading
 import time
+import unicodedata
+import requests
 
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -172,6 +175,271 @@ class POIViewSet(viewsets.ModelViewSet):
         if self.action == 'list':
             return POIListSerializer
         return POISerializer
+
+    @action(detail=False, methods=['get'])
+    def cities(self, request):
+        """
+        Return global city suggestions for typed query.
+        Source of truth is a live geocoding service (not a fixed local list).
+        Falls back to local POI inference if external service is unavailable.
+        """
+        _seed_demo_pois_if_empty()
+        query = str(request.query_params.get('q') or '').strip()
+        if len(query) < 2:
+            return Response({'count': 0, 'results': []})
+
+        def _normalize(text: str) -> str:
+            lowered = str(text or '').strip().lower()
+            no_diacritics = ''.join(
+                ch for ch in unicodedata.normalize('NFKD', lowered)
+                if not unicodedata.combining(ch)
+            )
+            return no_diacritics.replace('-', ' ').replace('_', ' ')
+
+        def _dedupe_keep_order(values):
+            seen = set()
+            output = []
+            for value in values:
+                key = _normalize(value)
+                if key and key not in seen:
+                    seen.add(key)
+                    output.append(value)
+            return output
+
+        def _fetch_global_city_suggestions(search_text: str):
+            """
+            Query OpenStreetMap Nominatim dynamically for worldwide city suggestions.
+            """
+            try:
+                response = requests.get(
+                    'https://nominatim.openstreetmap.org/search',
+                    params={
+                        'q': search_text,
+                        'format': 'jsonv2',
+                        'addressdetails': 1,
+                        'limit': 12,
+                    },
+                    headers={
+                        # Nominatim requires identifying User-Agent.
+                        'User-Agent': 'ExcursaCitySuggestions/1.0',
+                    },
+                    timeout=5,
+                )
+                response.raise_for_status()
+                data = response.json()
+            except Exception:
+                logger.exception("Global city suggestion lookup failed")
+                return []
+
+            allowed_place_types = {
+                'city', 'town', 'village', 'municipality', 'administrative'
+            }
+            ranked = []
+            for item in data or []:
+                item_type = str(item.get('type') or '').lower()
+                item_class = str(item.get('class') or '').lower()
+                if item_class != 'place' and item_type not in {'city', 'town', 'village'}:
+                    continue
+                if item_type and item_type not in allowed_place_types:
+                    continue
+
+                address = item.get('address') or {}
+                city_name = (
+                    address.get('city')
+                    or address.get('town')
+                    or address.get('village')
+                    or address.get('municipality')
+                    or item.get('name')
+                )
+                if not isinstance(city_name, str) or not city_name.strip():
+                    continue
+
+                importance = float(item.get('importance') or 0.0)
+                ranked.append((city_name.strip(), importance))
+
+            ranked.sort(key=lambda city: (-city[1], city[0].lower()))
+            return _dedupe_keep_order([name for name, _ in ranked])[:10]
+
+        global_results = _fetch_global_city_suggestions(query)
+        if global_results:
+            return Response({
+                'count': len(global_results),
+                'results': global_results,
+            })
+
+        queryset = POI.objects.all().only('address', 'metadata')
+        country_like = {
+            'turkiye', 'türkiye', 'turkey', 'france', 'germany', 'italy',
+            'spain', 'united_kingdom', 'uk', 'usa', 'united_states',
+        }
+        street_like_keywords = {
+            'mah', 'mahalle', 'sokak', 'sok', 'cadde', 'cad', 'bulvar', 'blv',
+            'apt', 'no', 'street', 'st', 'avenue', 'ave', 'road', 'rd',
+            'boulevard', 'blvd', 'district', 'neighborhood', 'arrondissement',
+            'quartier',
+        }
+
+        def _is_valid_city_label(value: str) -> bool:
+            cleaned = str(value or '').strip()
+            if not cleaned or len(cleaned) < 2 or len(cleaned) > 64:
+                return False
+            if re.search(r'\d', cleaned) or '#' in cleaned:
+                return False
+            tokens = [token for token in _normalize(cleaned).split() if token]
+            if not tokens or len(tokens) > 4:
+                return False
+            if any(token in street_like_keywords for token in tokens):
+                return False
+            return True
+
+        def _extract_city_from_address(address: str) -> str:
+            raw = str(address or '').strip()
+            if not raw:
+                return ''
+            parts = [part.strip() for part in raw.split(',') if part and part.strip()]
+            if len(parts) < 2:
+                return ''
+            candidate = parts[-1]
+            if _normalize(candidate).replace(' ', '_') in country_like and len(parts) >= 2:
+                candidate = parts[-2]
+            return candidate
+
+        city_counts = {}
+
+        def _add_city(value: str):
+            candidate = str(value or '').strip()
+            if not _is_valid_city_label(candidate):
+                return
+            key = _normalize(candidate)
+            if not key:
+                return
+            city_counts[key] = {
+                'name': city_counts.get(key, {}).get('name', candidate.title()),
+                'count': city_counts.get(key, {}).get('count', 0) + 1,
+            }
+
+        for poi in queryset:
+            metadata = poi.metadata if isinstance(poi.metadata, dict) else {}
+            for key in ('city', 'locality'):
+                value = metadata.get(key)
+                if isinstance(value, str):
+                    _add_city(value)
+            _add_city(_extract_city_from_address(poi.address))
+
+        query_norm = _normalize(query)
+        ranked = []
+        for key, data in city_counts.items():
+            if query_norm and query_norm not in key:
+                continue
+            ranked.append((data['name'], data['count']))
+
+        ranked.sort(key=lambda item: (-item[1], item[0].lower()))
+        cities = [name for name, _ in ranked[:30]]
+
+        return Response({
+            'count': len(cities),
+            'results': cities,
+        })
+
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
+    def generate_for_city(self, request):
+        """
+        Generate/sync POIs for a city using external providers (Google Places pipeline),
+        then return nearby POIs filtered by interests.
+
+        Body:
+        {
+          "city": "Paris",
+          "interests": ["historical", "food"],   // optional
+          "radius": 20000                         // optional, meters
+        }
+        """
+        city = str(request.data.get('city') or '').strip()
+        if not city:
+            return Response({'error': 'city is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            radius = int(request.data.get('radius', 20000))
+        except (TypeError, ValueError):
+            radius = 20000
+        radius = max(2000, min(radius, 50000))
+
+        # Resolve city center coordinates from dynamic geocoding.
+        try:
+            geocode_response = requests.get(
+                'https://geocoding-api.open-meteo.com/v1/search',
+                params={
+                    'name': city,
+                    'count': 1,
+                    'language': 'en',
+                    'format': 'json',
+                },
+                timeout=6,
+            )
+            geocode_response.raise_for_status()
+            geocode_results = geocode_response.json().get('results') or []
+            if not geocode_results:
+                return Response(
+                    {'error': f"City '{city}' could not be resolved to coordinates"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            center_result = geocode_results[0]
+            lat = float(center_result['latitude'])
+            lon = float(center_result['longitude'])
+        except Exception:
+            logger.exception("City geocoding failed city=%s", city)
+            return Response(
+                {'error': f"Failed to resolve city '{city}'"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Resolve interests from payload first, then user profile vector keys as fallback.
+        raw_interests = request.data.get('interests') or []
+        interests = []
+        if isinstance(raw_interests, str):
+            interests = [item.strip() for item in raw_interests.split(',') if item and item.strip()]
+        elif isinstance(raw_interests, list):
+            interests = [str(item).strip() for item in raw_interests if str(item).strip()]
+
+        if not interests:
+            try:
+                pref_vec = request.user.profile.preferences_vector or {}
+                if isinstance(pref_vec, dict):
+                    interests = [str(key).strip() for key in pref_vec.keys() if str(key).strip()]
+            except Exception:
+                interests = []
+
+        sync_service = ExternalSyncService(
+            google_api_key=getattr(settings, 'GOOGLE_PLACES_API_KEY', None),
+            fsq_api_key=getattr(settings, 'FOURSQUARE_API_KEY', None),
+        )
+        try:
+            created_count = sync_service.fetch_and_sync(lat, lon)
+        except Exception:
+            logger.exception("External sync failed city=%s lat=%s lon=%s", city, lat, lon)
+            created_count = 0
+
+        center = Point(lon, lat)
+        filters = {}
+        if interests:
+            filters['interests'] = interests
+            filters['interests_only'] = True
+        pois = GeoService.find_nearby(center, radius, filters)
+        if filters.get('interests_only') and pois.count() == 0:
+            fallback_filters = {k: v for k, v in filters.items() if k != 'interests_only'}
+            pois = GeoService.find_nearby(center, radius, fallback_filters)
+
+        serializer = POIListSerializer(pois[:120], many=True)
+        return Response({
+            'status': 'success',
+            'city': city,
+            'center': {'latitude': lat, 'longitude': lon},
+            'radius': radius,
+            'interests': interests,
+            'synced_pois_count': created_count,
+            'count': pois.count(),
+            'results': serializer.data,
+        })
     
     @action(detail=False, methods=['get'])
     def nearby(self, request):
@@ -208,11 +476,22 @@ class POIViewSet(viewsets.ModelViewSet):
             filters['category'] = request.query_params.get('category')
         if request.query_params.get('min_rating'):
             filters['min_rating'] = float(request.query_params.get('min_rating'))
+        interests = []
+        for raw in request.query_params.getlist('interests'):
+            interests.extend([item.strip() for item in str(raw).split(',') if item.strip()])
+        if interests:
+            filters['interests'] = interests
+        interests_only_raw = str(request.query_params.get('interests_only', '')).strip().lower()
+        if interests_only_raw in {'1', 'true', 'yes', 'on'}:
+            filters['interests_only'] = True
         
         # Get nearby POIs
         _seed_demo_pois_if_empty()
         center = Point(lon, lat)
         pois = GeoService.find_nearby(center, radius, filters)
+        if filters.get('interests_only') and pois.count() == 0:
+            fallback_filters = {k: v for k, v in filters.items() if k != 'interests_only'}
+            pois = GeoService.find_nearby(center, radius, fallback_filters)
         _maybe_trigger_external_sync(lat, lon, pois.count())
         
         serializer = POIListSerializer(pois, many=True)

@@ -130,3 +130,45 @@ class ItineraryShareLinkSerializer(serializers.Serializer):
     def get_share_link(self, obj):
         """Get the share link"""
         return obj.generate_share_link()
+
+
+class ItineraryGenerateRequestSerializer(serializers.Serializer):
+    """Request serializer for city + duration + interests trip generation."""
+
+    city = serializers.CharField(max_length=128)
+    duration_days = serializers.IntegerField(min_value=1, max_value=30)
+    interests = serializers.ListField(
+        child=serializers.CharField(max_length=64),
+        required=False,
+        allow_empty=True,
+        default=list,
+    )
+    start_date = serializers.DateField(required=False)
+    title = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    visibility = serializers.ChoiceField(
+        choices=Itinerary.Visibility.choices,
+        required=False,
+        default=Itinerary.Visibility.PRIVATE,
+    )
+    transport_mode = serializers.ChoiceField(
+        choices=Itinerary.TransportMode.choices,
+        required=False,
+        default=Itinerary.TransportMode.DRIVING,
+    )
+    stops_per_day = serializers.IntegerField(min_value=1, max_value=8, required=False, default=4)
+
+    def validate_city(self, value):
+        city = str(value or '').strip()
+        if not city:
+            raise serializers.ValidationError('city is required')
+        return city
+
+    def validate_interests(self, value):
+        normalized = []
+        seen = set()
+        for item in value or []:
+            parsed = str(item or '').strip().lower().replace('-', '_').replace(' ', '_')
+            if parsed and parsed not in seen:
+                normalized.append(parsed)
+                seen.add(parsed)
+        return normalized

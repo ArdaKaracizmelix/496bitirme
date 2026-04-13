@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -11,10 +11,14 @@ import {
   Alert,
   Modal,
   FlatList,
+  Platform,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
-import { useCreatePost, useGetPresignedUrl, useUploadToS3 } from '../hooks/useSocial';
+import { useCreatePost } from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
+import SocialService from '../services/SocialService';
+import TripService from '../services/TripService';
 
 /**
  * CreatePostScreen Component
@@ -24,8 +28,7 @@ export default function CreatePostScreen({ route }) {
   const navigation = useNavigation();
   const { user } = useAuthStore();
   const createPostMutation = useCreatePost();
-  const presignedUrlMutation = useGetPresignedUrl();
-  const uploadToS3Mutation = useUploadToS3();
+  const openTripPicker = !!route?.params?.openTripPicker;
 
   // Form state
   const [caption, setCaption] = useState('');
@@ -37,6 +40,10 @@ export default function CreatePostScreen({ route }) {
   const [showVisibilityOptions, setShowVisibilityOptions] = useState(false);
   const [showLocationSearch, setShowLocationSearch] = useState(false);
   const [locationSearch, setLocationSearch] = useState('');
+  const [showTripPicker, setShowTripPicker] = useState(false);
+  const [availableTrips, setAvailableTrips] = useState([]);
+  const [isLoadingTrips, setIsLoadingTrips] = useState(false);
+  const [selectedTrip, setSelectedTrip] = useState(null);
 
   const visibilityOptions = [
     { label: 'Herkese Açık', value: 'PUBLIC', icon: '🌍' },
@@ -44,25 +51,178 @@ export default function CreatePostScreen({ route }) {
     { label: 'Özel', value: 'PRIVATE', icon: '🔒' },
   ];
 
-  const showImagePickerUnavailable = () => {
-    Alert.alert(
-      'Özellik Geçici Olarak Kullanılamıyor',
-      'Medya seçimi için gerekli paket (expo-image-picker) bu kurulumda bulunamadı.'
-    );
+  const fetchTrips = async () => {
+    setIsLoadingTrips(true);
+    try {
+      const tripPayload = await TripService.fetchTrips();
+      const trips = Array.isArray(tripPayload?.results) ? tripPayload.results : (tripPayload || []);
+      const currentUsername = user?.username;
+      const ownTrips = currentUsername
+        ? trips.filter((trip) => trip?.username === currentUsername)
+        : trips;
+      setAvailableTrips(ownTrips);
+    } catch (error) {
+      Alert.alert('Hata', 'Rotalar yüklenemedi');
+    } finally {
+      setIsLoadingTrips(false);
+    }
   };
+
+  useEffect(() => {
+    if (openTripPicker) {
+      fetchTrips();
+      setShowTripPicker(true);
+    }
+  }, [openTripPicker]);
+
+  const selectedTripStopCount = useMemo(
+    () => selectedTrip?.stops?.length ?? selectedTrip?.total_stops ?? 0,
+    [selectedTrip]
+  );
+
+  const showImagePickerUnavailable = () => {
+    Alert.alert('Hata', 'Medya seçimi şu an kullanılamıyor.');
+  };
+
+  const MAX_MEDIA_COUNT = 6;
+
+  const appendMediaAssets = (assets = []) => {
+    if (!assets.length) return;
+    setSelectedMedia((prev) => {
+      const next = [...prev, ...assets];
+      if (next.length > MAX_MEDIA_COUNT) {
+        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA_COUNT} fotoğraf ekleyebilirsiniz.`);
+      }
+      return next.slice(0, MAX_MEDIA_COUNT);
+    });
+  };
+
+  const captureImageFromWeb = () =>
+    new Promise((resolve, reject) => {
+      if (typeof document === 'undefined') {
+        reject(new Error('Web document is not available'));
+        return;
+      }
+
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.capture = 'environment';
+      input.style.position = 'fixed';
+      input.style.left = '-9999px';
+      input.style.width = '1px';
+      input.style.height = '1px';
+      input.style.opacity = '0';
+
+      input.onchange = () => {
+        try {
+          const file = input.files && input.files[0];
+          if (!file) {
+            resolve(null);
+            return;
+          }
+
+          const objectUrl = URL.createObjectURL(file);
+          resolve({
+            uri: objectUrl,
+            file,
+            fileName: file.name || `camera-${Date.now()}.jpg`,
+            mimeType: file.type || 'image/jpeg',
+            type: 'image',
+          });
+        } catch (err) {
+          reject(err);
+        } finally {
+          input.remove();
+        }
+      };
+
+      input.onerror = (err) => {
+        input.remove();
+        reject(err);
+      };
+
+      document.body.appendChild(input);
+      input.click();
+    });
 
   /**
    * Handle media selection from device gallery
    */
   const handlePickMedia = async () => {
-    showImagePickerUnavailable();
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('İzin Gerekli', 'Galeriye erişim izni vermelisiniz.');
+        return;
+      }
+
+      const remainingSlots = MAX_MEDIA_COUNT - selectedMedia.length;
+      if (remainingSlots <= 0) {
+        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA_COUNT} fotoğraf ekleyebilirsiniz.`);
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        allowsMultipleSelection: true,
+        selectionLimit: remainingSlots,
+        quality: 0.85,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      appendMediaAssets(result.assets);
+    } catch (error) {
+      console.error('Error picking media:', error);
+      showImagePickerUnavailable();
+    }
   };
 
   /**
    * Handle capturing photo with camera
    */
   const handleTakePhoto = async () => {
-    showImagePickerUnavailable();
+    try {
+      if (Platform.OS === 'web') {
+        const captured = await captureImageFromWeb();
+        if (captured) {
+          appendMediaAssets([captured]);
+        } else {
+          Alert.alert('Bilgi', 'Tarayıcı kamera açmadı. Lütfen Galeri seçeneğini kullanın.');
+        }
+        return;
+      }
+
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('İzin Gerekli', 'Kamera izni vermelisiniz.');
+        return;
+      }
+
+      if (selectedMedia.length >= MAX_MEDIA_COUNT) {
+        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA_COUNT} fotoğraf ekleyebilirsiniz.`);
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.85,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      appendMediaAssets(result.assets.slice(0, 1));
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      showImagePickerUnavailable();
+    }
   };
 
   /**
@@ -89,12 +249,48 @@ export default function CreatePostScreen({ route }) {
     setLocationSearch(query);
   };
 
+  const formatTripDate = (dateValue) => {
+    if (!dateValue) return 'Tarih belirtilmedi';
+    try {
+      return new Date(dateValue).toLocaleDateString('tr-TR', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+    } catch {
+      return 'Tarih belirtilmedi';
+    }
+  };
+
+  const ensureTripShareLink = async (trip) => {
+    try {
+      const result = await TripService.shareTrip(trip.id);
+      return result?.share_link || null;
+    } catch (error) {
+      const message =
+        error?.response?.data?.error ||
+        error?.response?.data?.detail ||
+        error?.message ||
+        '';
+      const needsPublic = message.toLowerCase().includes('public itineraries');
+      if (!needsPublic) {
+        throw new Error(message || 'Rota paylaşım bağlantısı oluşturulamadı');
+      }
+
+      await TripService.updateTrip(trip.id, { visibility: 'PUBLIC' });
+      const refreshedTrip = await TripService.fetchTripById(trip.id);
+      setSelectedTrip(refreshedTrip);
+      const retryResult = await TripService.shareTrip(trip.id);
+      return retryResult?.share_link || null;
+    }
+  };
+
   /**
    * Handle form submission
    */
   const handleSubmitPost = async () => {
     // Validate input
-    if (!caption.trim() && selectedMedia.length === 0) {
+    if (!caption.trim() && selectedMedia.length === 0 && !selectedTrip) {
       Alert.alert('Hata', 'Lütfen en az bir yazı veya medya ekleyin');
       return;
     }
@@ -112,38 +308,30 @@ export default function CreatePostScreen({ route }) {
 
       for (const media of selectedMedia) {
         try {
-          // Get presigned URL
-          const fileExtension = media.fileName?.split('.').pop() || 'jpg';
-          const contentType =
-            media.type === 'video' ? `video/${fileExtension}` : `image/${fileExtension}`;
-
-          const presignedData = await presignedUrlMutation.mutateAsync({
-            filename: media.fileName,
-            contentType,
-          });
-
-          // Upload file to S3
-          const fileBlob = await fetch(media.uri).then((r) => r.blob());
-          await uploadToS3Mutation.mutateAsync({
-            presignedUrl: presignedData.presigned_url,
-            fileData: fileBlob,
-            contentType,
-          });
-
-          mediaUrls.push(presignedData.file_url);
+          const uploadedUrl = await SocialService.uploadPostImage(media);
+          mediaUrls.push(uploadedUrl);
         } catch (error) {
           console.error('Error uploading media:', error);
           throw new Error('Medya yüklenirken hata oluştu');
         }
       }
 
+      let tripShareLink = null;
+      if (selectedTrip?.id) {
+        tripShareLink = await ensureTripShareLink(selectedTrip);
+      }
+
+      const tripSummaryText = selectedTrip?.id
+        ? `\n\n🗺️ Rota: ${selectedTrip.title}\n📅 Başlangıç: ${formatTripDate(selectedTrip.start_date)}\n📍 Durak: ${selectedTripStopCount}${tripShareLink ? `\n🔗 ${tripShareLink}` : ''}`
+        : '';
+
       // Create post
       const postData = {
-        content: caption,
+        content: `${caption.trim()}${tripSummaryText}`.trim(),
         media_urls: mediaUrls,
         location: taggedLocation?.name || null,
         visibility,
-        tags,
+        tags: selectedTrip?.id ? Array.from(new Set([...tags, 'trip-share'])) : tags,
       };
 
       await createPostMutation.mutateAsync(postData);
@@ -155,6 +343,13 @@ export default function CreatePostScreen({ route }) {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleOpenTripPicker = async () => {
+    if (availableTrips.length === 0) {
+      await fetchTrips();
+    }
+    setShowTripPicker(true);
   };
 
   return (
@@ -268,6 +463,26 @@ export default function CreatePostScreen({ route }) {
           />
         </View>
 
+        <View style={styles.optionSection}>
+          <TouchableOpacity
+            style={styles.optionButton}
+            onPress={handleOpenTripPicker}
+          >
+            <Text style={styles.optionIcon}>🗺️</Text>
+            <Text style={styles.optionText}>
+              {selectedTrip ? 'Rota Seçimi Değiştir' : 'Rota Paylaş'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {selectedTrip && (
+          <View style={styles.selectedTripCard}>
+            <Text style={styles.selectedTripTitle} numberOfLines={1}>{selectedTrip.title}</Text>
+            <Text style={styles.selectedTripMeta}>📅 {formatTripDate(selectedTrip.start_date)}</Text>
+            <Text style={styles.selectedTripMeta}>📍 {selectedTripStopCount} durak</Text>
+          </View>
+        )}
+
         {tags.length > 0 && (
           <View style={styles.tagsDisplay}>
             {tags.map((tag, index) => (
@@ -313,6 +528,56 @@ export default function CreatePostScreen({ route }) {
             <TouchableOpacity
               style={styles.closeButton}
               onPress={() => setShowVisibilityOptions(false)}
+            >
+              <Text style={styles.closeButtonText}>Kapat</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showTripPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowTripPicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.tripModal}>
+            <Text style={styles.modalTitle}>Paylaşılacak Rota</Text>
+            {isLoadingTrips ? (
+              <View style={styles.tripListLoader}>
+                <ActivityIndicator size="small" color="#1a1a2e" />
+                <Text style={styles.tripListLoaderText}>Rotalar yükleniyor...</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={availableTrips}
+                keyExtractor={(item) => String(item.id)}
+                ListEmptyComponent={
+                  <Text style={styles.emptyTripText}>Henüz paylaşılacak rota yok.</Text>
+                }
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.tripListItem,
+                      selectedTrip?.id === item.id && styles.tripListItemSelected,
+                    ]}
+                    onPress={() => {
+                      setSelectedTrip(item);
+                      setShowTripPicker(false);
+                    }}
+                  >
+                    <Text style={styles.tripListItemTitle} numberOfLines={1}>{item.title}</Text>
+                    <Text style={styles.tripListItemMeta}>
+                      {formatTripDate(item.start_date)} • {item.total_stops ?? item.stops?.length ?? 0} durak
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setShowTripPicker(false)}
             >
               <Text style={styles.closeButtonText}>Kapat</Text>
             </TouchableOpacity>
@@ -508,6 +773,25 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     gap: 8,
   },
+  selectedTripCard: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dfe6e9',
+    backgroundColor: '#f8f9fb',
+    marginBottom: 16,
+  },
+  selectedTripTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1a1a2e',
+  },
+  selectedTripMeta: {
+    fontSize: 12,
+    color: '#596275',
+    marginTop: 4,
+  },
   tag: {
     paddingVertical: 6,
     paddingHorizontal: 12,
@@ -530,6 +814,51 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
     paddingVertical: 16,
     paddingHorizontal: 16,
+  },
+  tripModal: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    maxHeight: '70%',
+  },
+  tripListLoader: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tripListLoaderText: {
+    marginTop: 8,
+    color: '#596275',
+    fontSize: 13,
+  },
+  emptyTripText: {
+    color: '#999',
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
+  tripListItem: {
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  tripListItemSelected: {
+    borderColor: '#1a1a2e',
+    backgroundColor: '#f4f5fa',
+  },
+  tripListItemTitle: {
+    color: '#1a1a2e',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  tripListItemMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#596275',
   },
   modalTitle: {
     fontSize: 16,

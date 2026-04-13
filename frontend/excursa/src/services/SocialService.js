@@ -3,6 +3,7 @@
  * Handles all API calls related to posts, feed, comments, likes, and user profiles
  */
 import api from './api';
+import { Platform } from 'react-native';
 
 class SocialService {
   normalizeFeedResponse(payload) {
@@ -244,6 +245,51 @@ class SocialService {
       return true;
     } catch (error) {
       console.error('Error uploading to S3:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Upload a post image via backend media endpoint and return public URL.
+   */
+  async uploadPostImage(asset) {
+    try {
+      if (!asset?.uri) {
+        throw new Error('Invalid media asset');
+      }
+
+      const fileName = asset.fileName || `post-${Date.now()}.jpg`;
+      const contentType = asset.mimeType || 'image/jpeg';
+      const formData = new FormData();
+
+      if (Platform.OS === 'web') {
+        if (asset.file) {
+          formData.append('file', asset.file, fileName);
+        } else {
+          const blob = await fetch(asset.uri).then((res) => res.blob());
+          const file = new File([blob], fileName, { type: contentType });
+          formData.append('file', file, fileName);
+        }
+      } else {
+        formData.append('file', {
+          uri: asset.uri,
+          name: fileName,
+          type: contentType,
+        });
+      }
+
+      formData.append('optimize', 'true');
+
+      const response = await api.post('/media_storage/images/', formData, {
+        timeout: 60000,
+      });
+      const uploadedUrl = response?.data?.url;
+      if (!uploadedUrl) {
+        throw new Error('Media upload response did not include url');
+      }
+      return uploadedUrl;
+    } catch (error) {
+      console.error('Error uploading post image:', error);
       throw error;
     }
   }

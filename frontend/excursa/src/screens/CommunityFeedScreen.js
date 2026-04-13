@@ -40,6 +40,7 @@ export default function CommunityFeedScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPostId, setSelectedPostId] = useState(null);
   const [showPostOptions, setShowPostOptions] = useState(false);
+  const [showCreateOptions, setShowCreateOptions] = useState(false);
 
   // Flatten the paginated data structure
   const posts = data?.pages?.flatMap((page) => page.results) || [];
@@ -271,10 +272,46 @@ export default function CommunityFeedScreen() {
 
       <TouchableOpacity
         style={styles.fabCreateButton}
-        onPress={() => navigation.navigate('CreatePost')}
+        onPress={() => setShowCreateOptions(true)}
       >
         <Text style={styles.fabCreateButtonText}>+ Yeni Gönderi</Text>
       </TouchableOpacity>
+
+      <Modal
+        visible={showCreateOptions}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowCreateOptions(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.optionsModal}>
+            <TouchableOpacity
+              style={styles.optionButton}
+              onPress={() => {
+                setShowCreateOptions(false);
+                navigation.navigate('CreatePost');
+              }}
+            >
+              <Text style={styles.optionText}>Normal Gönderi Oluştur</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.optionButton}
+              onPress={() => {
+                setShowCreateOptions(false);
+                navigation.navigate('CreatePost', { openTripPicker: true });
+              }}
+            >
+              <Text style={styles.optionText}>Rota Paylaş</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.optionButton}
+              onPress={() => setShowCreateOptions(false)}
+            >
+              <Text style={styles.optionText}>İptal</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Post Options Modal */}
       <Modal

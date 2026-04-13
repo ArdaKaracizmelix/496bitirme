@@ -76,6 +76,19 @@ class TripService {
   }
 
   /**
+   * Generate trip from city + duration + interests
+   */
+  async generateTripFromPreferences(payload) {
+    try {
+      const response = await api.post('/trips/itineraries/generate_from_preferences/', payload);
+      return response.data;
+    } catch (error) {
+      console.error('Error generating trip from preferences:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Update an existing trip
    */
   async updateTrip(tripId, tripData) {

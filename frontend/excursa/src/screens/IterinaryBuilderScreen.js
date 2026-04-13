@@ -45,7 +45,14 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
 
   // Trip Store
   const store = useTripStore();
-  const { currentTrip, currentTripStops, currentTripMetrics, isOptimizing, isLoading } = store;
+  const {
+    currentTrip,
+    currentTripStops,
+    currentTripMetrics,
+    isOptimizing,
+    isLoading,
+    isGenerating,
+  } = store;
 
   // Local State
   const [tripTitle, setTripTitle] = useState('');
@@ -54,6 +61,13 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
   const [showPOISelector, setShowPOISelector] = useState(false);
   const [availablePOIs, setAvailablePOIs] = useState([]);
   const [draggedStopId, setDraggedStopId] = useState(null);
+  const [cityQuery, setCityQuery] = useState('');
+  const [selectedCity, setSelectedCity] = useState('');
+  const [citySuggestions, setCitySuggestions] = useState([]);
+  const [isCityLoading, setIsCityLoading] = useState(false);
+  const [showCitySuggestions, setShowCitySuggestions] = useState(false);
+  const [aiDurationDays, setAiDurationDays] = useState('3');
+  const [aiStopsPerDay, setAiStopsPerDay] = useState('4');
 
   // Load trip if ID provided
   useEffect(() => {
@@ -71,6 +85,25 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
     }
   }, [currentTrip]);
 
+  const loadCitySuggestions = useCallback(async (queryText) => {
+    setIsCityLoading(true);
+    try {
+      const cities = await locationService.fetchAvailableCities(queryText);
+      setCitySuggestions(Array.isArray(cities) ? cities : []);
+    } catch (error) {
+      setCitySuggestions([]);
+    } finally {
+      setIsCityLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      loadCitySuggestions(cityQuery);
+    }, 250);
+    return () => clearTimeout(handler);
+  }, [cityQuery, loadCitySuggestions]);
+
   const toIsoDateTime = (dateValue) => {
     if (!dateValue) return null;
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
@@ -79,6 +112,106 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
     const parsed = new Date(dateValue);
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
   };
+
+  const handleGenerateTrip = useCallback(async () => {
+    const typedCity = cityQuery.trim();
+    let city = selectedCity.trim();
+    const durationDays = Number.parseInt(aiDurationDays, 10);
+    const stopsPerDay = Number.parseInt(aiStopsPerDay, 10);
+
+    if (!typedCity) {
+      Alert.alert('Hata', 'Lütfen şehir yazın');
+      return;
+    }
+    if (!city) {
+      let exactMatch = citySuggestions.find(
+        (item) => String(item).toLowerCase() === typedCity.toLowerCase()
+      );
+      if (!exactMatch) {
+        try {
+          const latestSuggestions = await locationService.fetchAvailableCities(typedCity);
+          exactMatch = (latestSuggestions || []).find(
+            (item) => String(item).toLowerCase() === typedCity.toLowerCase()
+          );
+          if (Array.isArray(latestSuggestions)) {
+            setCitySuggestions(latestSuggestions);
+          }
+        } catch (error) {
+          exactMatch = null;
+        }
+      }
+      if (exactMatch) {
+        city = exactMatch;
+        setSelectedCity(exactMatch);
+      } else {
+        Alert.alert('Hata', 'Lütfen önerilerden bir şehir seçin');
+        return;
+      }
+    }
+    if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 30) {
+      Alert.alert('Hata', 'Gün sayısı 1 ile 30 arasında olmalı');
+      return;
+    }
+    if (!Number.isInteger(stopsPerDay) || stopsPerDay < 1 || stopsPerDay > 8) {
+      Alert.alert('Hata', 'Günlük durak sayısı 1 ile 8 arasında olmalı');
+      return;
+    }
+
+    try {
+      const userInterests = Array.isArray(user?.interests)
+        ? user.interests
+            .map((item) => {
+              if (typeof item === 'string') return item;
+              if (item?.name) return String(item.name);
+              if (item?.title) return String(item.title);
+              return '';
+            })
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : [];
+
+      // 1) Generate/sync city POIs for this user's interests (Google Places pipeline).
+      await locationService.generatePOIsForCity(city, userInterests, 20000);
+
+      // 2) Generate itinerary from now-available city POIs.
+      const result = await store.generateTripFromPreferences({
+        city,
+        duration_days: durationDays,
+        start_date: tripDate || undefined,
+        title: tripTitle.trim() || undefined,
+        visibility: 'PRIVATE',
+        transport_mode: transportMode,
+        stops_per_day: stopsPerDay,
+      });
+
+      const selectedCount = result?.summary?.selected_pois_count ?? 0;
+      const generatedTitle = result?.itinerary?.title;
+      if (generatedTitle) {
+        setTripTitle(generatedTitle);
+      }
+      if (result?.summary?.start_date) {
+        setTripDate(result.summary.start_date);
+      }
+      if (result?.itinerary?.transport_mode) {
+        setTransportMode(result.itinerary.transport_mode);
+      }
+
+      Alert.alert('Başarılı', `Rota oluşturuldu. ${selectedCount} popüler durak eklendi.`);
+    } catch (error) {
+      Alert.alert('Hata', error?.message || 'Rota oluşturulamadı');
+    }
+  }, [
+    cityQuery,
+    selectedCity,
+    citySuggestions,
+    aiDurationDays,
+    aiStopsPerDay,
+    tripDate,
+    tripTitle,
+    transportMode,
+    user,
+    store,
+  ]);
 
   /**
    * Load available POIs for selection
@@ -403,6 +536,81 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
           />
         </View>
 
+        {/* AI Trip Generation Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>AI ile Rota Oluştur</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Şehir yazın (örn. Paris)"
+            value={cityQuery}
+            onChangeText={(text) => {
+              setCityQuery(text);
+              setSelectedCity('');
+              setShowCitySuggestions(true);
+            }}
+            onFocus={() => setShowCitySuggestions(true)}
+            placeholderTextColor="#ccc"
+          />
+          {showCitySuggestions && (cityQuery.trim().length >= 2) ? (
+            <View style={styles.citySuggestionsContainer}>
+              {isCityLoading ? (
+                <View style={styles.citySuggestionLoading}>
+                  <ActivityIndicator size="small" color="#1a1a2e" />
+                </View>
+              ) : (
+                citySuggestions.length > 0 ? (
+                  citySuggestions.slice(0, 8).map((cityItem) => (
+                    <TouchableOpacity
+                      key={cityItem}
+                      style={styles.citySuggestionItem}
+                      onPress={() => {
+                        setSelectedCity(cityItem);
+                        setCityQuery(cityItem);
+                        setShowCitySuggestions(false);
+                      }}
+                    >
+                      <Text style={styles.citySuggestionText}>{cityItem}</Text>
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <View style={styles.citySuggestionEmpty}>
+                    <Text style={styles.citySuggestionEmptyText}>Şehir bulunamadı</Text>
+                  </View>
+                )
+              )}
+            </View>
+          ) : null}
+          <View style={styles.aiRow}>
+            <TextInput
+              style={[styles.input, styles.aiInputHalf]}
+              placeholder="Kaç gün? (1-30)"
+              value={aiDurationDays}
+              onChangeText={setAiDurationDays}
+              keyboardType="numeric"
+              placeholderTextColor="#ccc"
+            />
+            <TextInput
+              style={[styles.input, styles.aiInputHalf]}
+              placeholder="Durak/gün (1-8)"
+              value={aiStopsPerDay}
+              onChangeText={setAiStopsPerDay}
+              keyboardType="numeric"
+              placeholderTextColor="#ccc"
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.generateButton, isGenerating && styles.generateButtonDisabled]}
+            onPress={handleGenerateTrip}
+            disabled={isGenerating}
+          >
+            {isGenerating ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.generateButtonText}>✨ Şehre Göre Rota Oluştur</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
         {/* Metrics Section */}
         {currentTripMetrics && (
           <View style={styles.section}>
@@ -630,6 +838,62 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 12,
     backgroundColor: '#fafafa',
+  },
+  aiRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  aiInputHalf: {
+    flex: 1,
+  },
+  citySuggestionsContainer: {
+    marginTop: -8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  citySuggestionLoading: {
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  citySuggestionItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  citySuggestionText: {
+    color: '#1a1a2e',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  citySuggestionEmpty: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  citySuggestionEmptyText: {
+    color: '#999',
+    fontSize: 13,
+  },
+  generateButton: {
+    marginTop: 4,
+    backgroundColor: '#34495e',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  generateButtonDisabled: {
+    opacity: 0.7,
+  },
+  generateButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
   },
   metricsGrid: {
     flexDirection: 'row',

@@ -57,6 +57,12 @@ const buildWebMapHtml = (markers, region) => {
 
   const centerLat = region?.latitude || 41.0082;
   const centerLng = region?.longitude || 28.9784;
+  const explicitZoom = Number(region?.zoomLevel);
+  const latDelta = Number(region?.latitudeDelta) || 0.1;
+  // Prefer exact zoom from map events; fallback to delta-based approximation.
+  const estimatedZoom = Number.isFinite(explicitZoom)
+    ? Math.max(2, Math.min(18, Math.round(explicitZoom)))
+    : Math.max(2, Math.min(18, Math.round(Math.log2(360 / Math.max(latDelta, 0.0001)))));
 
   return `
 <!DOCTYPE html>
@@ -86,7 +92,7 @@ const buildWebMapHtml = (markers, region) => {
   <div id="map"></div>
   <script>
     var markers = ${JSON.stringify(safeMarkers)};
-    var map = L.map('map', { zoomControl: true }).setView([${centerLat}, ${centerLng}], 13);
+    var map = L.map('map', { zoomControl: true }).setView([${centerLat}, ${centerLng}], ${estimatedZoom});
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19
     }).addTo(map);
@@ -125,7 +131,8 @@ const buildWebMapHtml = (markers, region) => {
           latitude: c.lat,
           longitude: c.lng,
           latitudeDelta: Math.abs(b.getNorth() - b.getSouth()),
-          longitudeDelta: Math.abs(b.getEast() - b.getWest())
+          longitudeDelta: Math.abs(b.getEast() - b.getWest()),
+          zoomLevel: map.getZoom()
         }
       }), '*');
     }
@@ -166,6 +173,7 @@ export default function MapScreen({ navigation }) {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
   const [searchText, setSearchText] = useState('');
+  const [searchDebouncedText, setSearchDebouncedText] = useState('');
   const webMapHtml = useMemo(
     () => buildWebMapHtml(displayedMarkers, currentRegion),
     [displayedMarkers]
@@ -201,6 +209,17 @@ export default function MapScreen({ navigation }) {
   useEffect(() => {
     markersRef.current = displayedMarkers;
   }, [displayedMarkers]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchDebouncedText(searchText);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchText]);
+
+  useEffect(() => {
+    handleSearch(searchDebouncedText);
+  }, [searchDebouncedText, handleSearch]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return undefined;
@@ -418,13 +437,10 @@ export default function MapScreen({ navigation }) {
             placeholder="Yer ara..."
             placeholderTextColor="#95a5a6"
             value={searchText}
-            onChangeText={(text) => {
-              setSearchText(text);
-              handleSearch(text);
-            }}
+            onChangeText={setSearchText}
           />
           {searchText.length > 0 && (
-            <TouchableOpacity onPress={() => { setSearchText(''); handleSearch(''); }}>
+            <TouchableOpacity onPress={() => setSearchText('')}>
               <Text style={styles.clearButton}>✕</Text>
             </TouchableOpacity>
           )}
@@ -521,6 +537,22 @@ export default function MapScreen({ navigation }) {
                     </TouchableOpacity>
                   ))}
                 </View>
+              </View>
+
+              {/* Interest Personalization */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>İlgi Alanı Modu</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.ratingOption,
+                    activeFilters.interestsOnly && styles.ratingOptionActive,
+                  ]}
+                  onPress={() => updateFilters({ interestsOnly: !activeFilters.interestsOnly })}
+                >
+                  <Text style={styles.ratingOptionText}>
+                    {activeFilters.interestsOnly ? 'Sadece ilgi alanlarım' : 'İlgi alanlarını önceliklendir'}
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               {/* Clear Filters Button */}

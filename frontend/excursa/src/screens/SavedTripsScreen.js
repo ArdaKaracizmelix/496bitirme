@@ -17,7 +17,7 @@ import {
   Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useUpcomingTrips, usePastTrips } from '../hooks/useTrips';
+import { useTrips } from '../hooks/useTrips';
 import useTripStore from '../store/tripStore';
 import TripService from '../services/TripService';
 import useAuthStore from '../store/authStore';
@@ -42,8 +42,7 @@ export default function SavedTripsScreen({ navigation }) {
   const store = useTripStore();
 
   // Query hooks
-  const { data: upcomingData, isLoading: upcomingLoading, refetch: refetchUpcoming } = useUpcomingTrips();
-  const { data: pastData, isLoading: pastLoading, refetch: refetchPast } = usePastTrips();
+  const { data: tripsData, isLoading: tripsLoading, refetch: refetchTrips } = useTrips();
 
   // Local state
   const [activeTab, setActiveTab] = useState('UPCOMING');
@@ -53,8 +52,28 @@ export default function SavedTripsScreen({ navigation }) {
   const [showActionMenu, setShowActionMenu] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
-  const upcomingTrips = Array.isArray(upcomingData?.results) ? upcomingData.results : upcomingData || [];
-  const pastTrips = Array.isArray(pastData?.results) ? pastData.results : pastData || [];
+  const allTrips = Array.isArray(tripsData?.results) ? tripsData.results : tripsData || [];
+  const currentUsername = user?.username;
+  const ownTrips = currentUsername
+    ? allTrips.filter((trip) => trip?.username === currentUsername)
+    : allTrips;
+
+  const isPastTrip = (trip) => {
+    if (trip?.status === 'COMPLETED' || trip?.status === 'ARCHIVED') {
+      return true;
+    }
+    if (!trip?.end_date) {
+      return false;
+    }
+    const endAt = new Date(trip.end_date);
+    if (Number.isNaN(endAt.getTime())) {
+      return false;
+    }
+    return endAt < new Date();
+  };
+
+  const upcomingTrips = ownTrips.filter((trip) => !isPastTrip(trip));
+  const pastTrips = ownTrips.filter(isPastTrip);
 
   /**
    * Handle pull-to-refresh
@@ -62,11 +81,11 @@ export default function SavedTripsScreen({ navigation }) {
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      await Promise.all([refetchUpcoming(), refetchPast()]);
+      await refetchTrips();
     } finally {
       setIsRefreshing(false);
     }
-  }, [refetchUpcoming, refetchPast]);
+  }, [refetchTrips]);
 
   /**
    * Format date to readable format
@@ -128,8 +147,7 @@ export default function SavedTripsScreen({ navigation }) {
               await store.deleteTrip(selectedTrip.id);
               setShowTripDetails(false);
               Alert.alert('Başarılı', 'Rota silindi');
-              refetchUpcoming();
-              refetchPast();
+              refetchTrips();
             } catch (error) {
               Alert.alert('Hata', 'Rota silinemedi');
             }
@@ -137,7 +155,7 @@ export default function SavedTripsScreen({ navigation }) {
         },
       ]
     );
-  }, [selectedTrip, store, refetchUpcoming, refetchPast]);
+  }, [selectedTrip, store, refetchTrips]);
 
   /**
    * Handle sharing trip
@@ -216,7 +234,7 @@ export default function SavedTripsScreen({ navigation }) {
               await store.cloneTrip(selectedTrip.id);
               setShowTripDetails(false);
               Alert.alert('Başarılı', 'Rota kopyalandı');
-              refetchUpcoming();
+              refetchTrips();
             } catch (error) {
               Alert.alert('Hata', 'Rota kopyalanamadı');
             }
@@ -224,7 +242,7 @@ export default function SavedTripsScreen({ navigation }) {
         },
       ]
     );
-  }, [selectedTrip, store, refetchUpcoming]);
+  }, [selectedTrip, store, refetchTrips]);
 
   /**
    * Handle exporting to calendar
@@ -347,7 +365,7 @@ export default function SavedTripsScreen({ navigation }) {
   );
 
   const displayTrips = activeTab === 'UPCOMING' ? upcomingTrips : pastTrips;
-  const isLoading = activeTab === 'UPCOMING' ? upcomingLoading : pastLoading;
+  const isLoading = tripsLoading;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>

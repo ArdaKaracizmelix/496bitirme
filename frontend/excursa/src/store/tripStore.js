@@ -24,6 +24,7 @@ const useTripStore = create((set, get) => ({
   // Loading States
   isLoading: false,
   isOptimizing: false,
+  isGenerating: false,
   isRefreshing: false,
 
   // Error State
@@ -142,6 +143,41 @@ const useTripStore = create((set, get) => ({
       set({ error: error.message, isLoading: false });
       console.error('Failed to create trip:', error);
       throw error;
+    }
+  },
+
+  /**
+   * Generate itinerary from city + duration + interests
+   */
+  generateTripFromPreferences: async (payload) => {
+    set({ isGenerating: true, error: null });
+    try {
+      const result = await TripService.generateTripFromPreferences(payload);
+      const itinerary = result?.itinerary;
+      const stops = itinerary?.stops || [];
+      const distances = stops.length > 1
+        ? RouteManager.getConsecutiveDistances(stops.map((s) => s.poi))
+        : [];
+      const metrics = RouteManager.calculateMetrics(stops, distances);
+
+      set((state) => ({
+        currentTrip: itinerary || null,
+        currentTripStops: stops,
+        currentTripMetrics: metrics,
+        draftTrips: itinerary ? [itinerary, ...state.draftTrips] : state.draftTrips,
+        isGenerating: false,
+      }));
+
+      return result;
+    } catch (error) {
+      const message =
+        error?.response?.data?.error ||
+        error?.response?.data?.detail ||
+        error?.message ||
+        'Failed to generate trip';
+      set({ error: message, isGenerating: false });
+      console.error('Failed to generate trip from preferences:', error);
+      throw new Error(message);
     }
   },
 

@@ -1,7 +1,33 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'http://localhost:8000/api';
+const envApiUrl =
+  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL) || '';
+const envApiPort =
+  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_PORT) || '8000';
+
+const normalizeApiUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
+
+const resolveApiUrl = () => {
+  const normalizedEnvUrl = normalizeApiUrl(envApiUrl);
+  if (normalizedEnvUrl) {
+    return normalizedEnvUrl;
+  }
+
+  // Web fallback: keep host/protocol, but point to backend port (default 8000),
+  // so requests don't accidentally hit Expo dev server port (e.g. 8081/19006).
+  if (typeof window !== 'undefined' && window.location) {
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:${envApiPort}/api`;
+  }
+
+  return 'http://localhost:8000/api';
+};
+
+const API_URL = resolveApiUrl();
+if (typeof console !== 'undefined') {
+  console.info('[API] baseURL:', API_URL);
+}
 const ACCESS_TOKEN_KEY = '@excursa_access_token';
 const REFRESH_TOKEN_KEY = '@excursa_refresh_token';
 const USER_PROFILE_KEY = '@excursa_user_profile';
@@ -31,7 +57,7 @@ const clearAuthState = async () => {
 
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 12000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
