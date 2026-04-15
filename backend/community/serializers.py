@@ -21,6 +21,8 @@ class PostDTO(serializers.Serializer):
     """
     id = serializers.CharField(read_only=True)
     user_ref_id = serializers.UUIDField()
+    user_name = serializers.CharField(read_only=True)
+    avatar_url = serializers.URLField(read_only=True, allow_null=True)
     content = serializers.CharField(max_length=5000)
     media_urls = serializers.ListField(
         child=serializers.URLField(),
@@ -42,6 +44,7 @@ class PostDTO(serializers.Serializer):
         default='PUBLIC'
     )
     virality_score = serializers.FloatField(read_only=True)
+    liked = serializers.BooleanField(read_only=True)
 
 
 class SocialPostCreateSerializer(serializers.Serializer):

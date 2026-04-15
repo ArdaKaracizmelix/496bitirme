@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, SafeAreaView, ScrollView
+  ActivityIndicator, ScrollView, Platform
 } from 'react-native';
 import AuthManager from '../../services/AuthManager';
 import useAuthStore from '../../store/authStore';
@@ -135,20 +135,56 @@ export default function InterestSelectionScreen({ route, navigation }) {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1a1a2e" />
           <Text style={styles.loadingText}>İlgi alanları yükleniyor...</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
+  // Render tags in a grid format
+  const renderTagGrid = () => {
+    const rows = [];
+    for (let i = 0; i < availableTags.length; i += 2) {
+      const rowTags = availableTags.slice(i, i + 2);
+      rows.push(
+        <View key={i} style={styles.tagRow}>
+          {rowTags.map((tag) => (
+            <TouchableOpacity
+              key={tag.id}
+              style={[
+                styles.tagButton,
+                selectedTagIds.has(tag.id) && styles.tagButtonSelected,
+              ]}
+              onPress={() => toggleInterest(tag.id)}
+              disabled={isSubmitting}
+            >
+              <Text
+                style={[
+                  styles.tagText,
+                  selectedTagIds.has(tag.id) && styles.tagTextSelected,
+                ]}
+              >
+                {tag.title || tag.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      );
+    }
+    return rows;
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={true}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled={true}
       >
         <Text style={styles.title}>İlgi Alanlarını Seç</Text>
         <Text style={styles.subtitle}>
@@ -186,31 +222,10 @@ export default function InterestSelectionScreen({ route, navigation }) {
           </View>
         ) : null}
 
-        {/* Interest Tags Grid */}
         <View style={styles.tagsContainer}>
-          {availableTags.map((tag) => (
-            <TouchableOpacity
-              key={tag.id}
-              style={[
-                styles.tagButton,
-                selectedTagIds.has(tag.id) && styles.tagButtonSelected,
-              ]}
-              onPress={() => toggleInterest(tag.id)}
-              disabled={isSubmitting}
-            >
-              <Text
-                style={[
-                  styles.tagText,
-                  selectedTagIds.has(tag.id) && styles.tagTextSelected,
-                ]}
-              >
-                {tag.title || tag.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {renderTagGrid()}
         </View>
 
-        {/* Selected Count */}
         <Text style={styles.selectionInfo}>
           {selectedTagIds.size > 0
             ? `${selectedTagIds.size} ilgi alanı seçildi`
@@ -218,7 +233,6 @@ export default function InterestSelectionScreen({ route, navigation }) {
         </Text>
       </ScrollView>
 
-      {/* Footer */}
       <View style={styles.footer}>
         <TouchableOpacity
           style={[
@@ -235,7 +249,7 @@ export default function InterestSelectionScreen({ route, navigation }) {
           )}
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -243,11 +257,27 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+    height: Platform.OS === 'web' ? '100vh' : '100%',
+    maxHeight: Platform.OS === 'web' ? '100vh' : '100%',
+  },
+  scrollView: {
+    flex: 1,
+    width: '100%',
   },
   scrollContent: {
     paddingHorizontal: 24,
     paddingTop: 32,
-    paddingBottom: 120,
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
+  tagsContainer: {
+    marginVertical: 16,
+    width: '100%',
+  },
+  tagRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
   title: {
     fontSize: 28,
@@ -316,20 +346,17 @@ const styles = StyleSheet.create({
     color: '#cc0000',
     marginBottom: 6,
   },
-  tagsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 20,
-  },
   tagButton: {
-    paddingHorizontal: 16,
+    flex: 1,
+    paddingHorizontal: 12,
     paddingVertical: 12,
-    borderRadius: 24,
+    borderRadius: 14,
     borderWidth: 2,
     borderColor: '#ddd',
     backgroundColor: '#f9f9f9',
-    marginBottom: 8,
+    marginHorizontal: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   tagButtonSelected: {
     borderColor: '#1a1a2e',
@@ -351,14 +378,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 24,
     backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#eee'
+    borderTopColor: '#eee',
+    width: '100%',
   },
   submitButton: {
     width: '100%',

@@ -345,6 +345,12 @@ class LoginView(APIView):
             )
 
         account = User.objects.filter(email__iexact=email).first()
+        if account and not account.is_active and account.check_password(password):
+            return Response(
+                {"detail": "Please verify your email before logging in"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         username_for_auth = account.username if account else email
         user = authenticate(request, username=username_for_auth, password=password)
         if user is None:
@@ -563,7 +569,12 @@ class ProfileView(APIView):
     def get(self,request,id):
         profile = get_object_or_404(UserProfile,id=id)
         serializer = UserProfileSerializer(profile)
-        return Response(serializer.data)
+        payload = dict(serializer.data)
+        viewer_profile = getattr(request.user, "profile", None)
+        payload["is_following"] = bool(
+            viewer_profile and viewer_profile.id != profile.id and viewer_profile.is_following(profile)
+        )
+        return Response(payload)
 
 class FollowView(APIView):
     #permission_classes = [IsAuthenticated]
@@ -616,6 +627,54 @@ class UnfollowView(APIView):
             status=status.HTTP_200_OK
 
         )
+
+
+class FollowersListView(APIView):
+    #permission_classes = [IsAuthenticated]
+
+    def get(self, request, id):
+        target_profile = get_object_or_404(UserProfile, id=id)
+        follower_profiles = UserProfile.objects.filter(
+            following_relation__following=target_profile
+        ).select_related("user")
+
+        followers = [
+            {
+                "id": str(profile.id),
+                "username": profile.user.username,
+                "full_name": f"{profile.user.first_name} {profile.user.last_name}".strip(),
+                "avatar_url": profile.avatar_url,
+                "bio": profile.bio,
+                "is_verified": profile.is_verified,
+            }
+            for profile in follower_profiles
+        ]
+
+        return Response({"results": followers}, status=status.HTTP_200_OK)
+
+
+class FollowingListView(APIView):
+    #permission_classes = [IsAuthenticated]
+
+    def get(self, request, id):
+        target_profile = get_object_or_404(UserProfile, id=id)
+        following_profiles = UserProfile.objects.filter(
+            follower_relation__follower=target_profile
+        ).select_related("user")
+
+        following = [
+            {
+                "id": str(profile.id),
+                "username": profile.user.username,
+                "full_name": f"{profile.user.first_name} {profile.user.last_name}".strip(),
+                "avatar_url": profile.avatar_url,
+                "bio": profile.bio,
+                "is_verified": profile.is_verified,
+            }
+            for profile in following_profiles
+        ]
+
+        return Response({"results": following}, status=status.HTTP_200_OK)
 
 
 class InterestAvailableView(APIView):

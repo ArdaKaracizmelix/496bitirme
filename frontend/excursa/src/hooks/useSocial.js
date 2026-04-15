@@ -53,11 +53,12 @@ const mergeLikeResponse = (existingPost, response) => {
 /**
  * Hook: Fetch home feed with infinite scroll pagination
  */
-export const useFeed = () => {
+export const useFeed = (feedType = 'following') => {
   return useInfiniteQuery({
-    queryKey: ['feed'],
+    queryKey: ['feed', feedType],
     queryFn: async ({ pageParam = null }) => {
-      const response = await SocialService.fetchFeed(pageParam, 10);
+      const initialPage = feedType === 'global' ? 0 : null;
+      const response = await SocialService.fetchFeed(feedType, pageParam ?? initialPage, 10);
       return response;
     },
     getNextPageParam: (lastPage) => lastPage.nextPageCursor || undefined,
@@ -193,21 +194,21 @@ export const useToggleLike = () => {
 
       // Snapshot the previous value
       const previousPost = queryClient.getQueryData(['post', targetPostId]);
-      const previousFeed = queryClient.getQueryData(['feed']);
+      const previousFeeds = queryClient.getQueriesData({ queryKey: ['feed'] });
 
       // Optimistically update to new value
       if (previousPost) {
         queryClient.setQueryData(['post', targetPostId], applyLikeToggle(previousPost));
       }
 
-      if (previousFeed) {
+      previousFeeds.forEach(([feedKey, feedValue]) => {
         queryClient.setQueryData(
-          ['feed'],
-          updatePostInsideFeedPages(previousFeed, targetPostId, applyLikeToggle)
+          feedKey,
+          updatePostInsideFeedPages(feedValue, targetPostId, applyLikeToggle)
         );
-      }
+      });
 
-      return { previousPost, previousFeed, targetPostId };
+      return { previousPost, previousFeeds, targetPostId };
     },
     onError: (_, __, context) => {
       if (!context?.targetPostId) return;
@@ -216,8 +217,10 @@ export const useToggleLike = () => {
       if (context?.previousPost) {
         queryClient.setQueryData(['post', context.targetPostId], context.previousPost);
       }
-      if (context?.previousFeed) {
-        queryClient.setQueryData(['feed'], context.previousFeed);
+      if (Array.isArray(context?.previousFeeds)) {
+        context.previousFeeds.forEach(([feedKey, feedValue]) => {
+          queryClient.setQueryData(feedKey, feedValue);
+        });
       }
     },
     onSuccess: (response, targetPostId) => {
@@ -226,11 +229,13 @@ export const useToggleLike = () => {
       queryClient.setQueryData(['post', targetPostId], (existingPost) =>
         mergeLikeResponse(existingPost, response)
       );
-      queryClient.setQueryData(['feed'], (oldFeed) =>
-        updatePostInsideFeedPages(oldFeed, targetPostId, (existingPost) =>
-          mergeLikeResponse(existingPost, response)
-        )
-      );
+      queryClient.getQueriesData({ queryKey: ['feed'] }).forEach(([feedKey]) => {
+        queryClient.setQueryData(feedKey, (oldFeed) =>
+          updatePostInsideFeedPages(oldFeed, targetPostId, (existingPost) =>
+            mergeLikeResponse(existingPost, response)
+          )
+        );
+      });
     },
   });
 };

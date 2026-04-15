@@ -42,6 +42,13 @@ const escapeHtml = (value = '') =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+const formatInterestLabel = (value = '') =>
+  String(value || '')
+    .trim()
+    .replace(/[_\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+
 const buildWebMapHtml = (markers, region) => {
   const safeMarkers = (markers || []).map((item) => ({
     id: item.id || `${item.latitude}-${item.longitude}`,
@@ -53,6 +60,7 @@ const buildWebMapHtml = (markers, region) => {
     count: item.count || 1,
     category: item.category || '',
     average_rating: item.average_rating || 0,
+    matched_interests: Array.isArray(item.matched_interests) ? item.matched_interests : [],
   }));
 
   const centerLat = region?.latitude || 41.0082;
@@ -113,7 +121,10 @@ const buildWebMapHtml = (markers, region) => {
       var marker = L.marker([item.latitude, item.longitude]).addTo(map);
       var popupTitle = item.nameEscaped || 'POI';
       var popupCategory = item.category ? '<br/>' + item.category : '';
-      marker.bindPopup('<b>' + popupTitle + '</b>' + popupCategory);
+      var popupInterest = Array.isArray(item.matched_interests) && item.matched_interests.length > 0
+        ? '<br/>🎯 ' + item.matched_interests[0].replace(/[_\\-]+/g, ' ')
+        : '';
+      marker.bindPopup('<b>' + popupTitle + '</b>' + popupCategory + popupInterest);
       marker.on('click', function() {
         window.parent.postMessage(JSON.stringify({
           type: 'poi-click',
@@ -314,6 +325,11 @@ export default function MapScreen({ navigation }) {
             <View style={styles.callout}>
               <Text style={styles.calloutTitle}>{item.name}</Text>
               <Text style={styles.calloutCategory}>{getCategoryName(item.category)}</Text>
+              {Array.isArray(item.matched_interests) && item.matched_interests.length > 0 ? (
+                <Text style={styles.calloutInterest}>
+                  🎯 {formatInterestLabel(item.matched_interests[0])}
+                </Text>
+              ) : null}
               <Text style={styles.calloutRating}>⭐ {item.average_rating?.toFixed(1)}</Text>
             </View>
           </Callout>
@@ -738,6 +754,12 @@ const styles = StyleSheet.create({
   calloutRating: {
     fontSize: 12,
     color: '#f39c12',
+    fontWeight: '600',
+  },
+  calloutInterest: {
+    fontSize: 12,
+    color: '#16a085',
+    marginBottom: 4,
     fontWeight: '600',
   },
   bottomSheet: {

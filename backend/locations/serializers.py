@@ -73,6 +73,7 @@ class POIListSerializer(serializers.ModelSerializer):
     
     latitude = serializers.SerializerMethodField()
     longitude = serializers.SerializerMethodField()
+    matched_interests = serializers.SerializerMethodField()
     
     class Meta:
         model = POI
@@ -83,6 +84,7 @@ class POIListSerializer(serializers.ModelSerializer):
             'longitude',
             'category',
             'average_rating',
+            'matched_interests',
         ]
     
     def get_latitude(self, obj):
@@ -94,6 +96,41 @@ class POIListSerializer(serializers.ModelSerializer):
         if obj.location:
             return obj.location.x
         return None
+
+    def get_matched_interests(self, obj):
+        requested = self.context.get('requested_interests') or []
+        if not isinstance(requested, list) or not requested:
+            return []
+
+        def _normalize(value):
+            return str(value or '').strip().lower().replace('-', '_').replace(' ', '_')
+
+        poi_tags = [_normalize(tag) for tag in (obj.tags or []) if _normalize(tag)]
+        if not poi_tags:
+            return []
+
+        poi_tags_set = set(poi_tags)
+        matches = []
+        for item in requested:
+            normalized = _normalize(item)
+            if not normalized:
+                continue
+            singular = normalized[:-1] if normalized.endswith('s') else normalized
+            if (
+                normalized in poi_tags_set
+                or singular in poi_tags_set
+                or any(
+                    normalized in tag
+                    or tag in normalized
+                    or singular in tag
+                    or tag in singular
+                    for tag in poi_tags_set
+                )
+            ):
+                matches.append(normalized)
+
+        # Keep deterministic uniqueness
+        return list(dict.fromkeys(matches))
 
 
 class ClusterSerializer(serializers.Serializer):

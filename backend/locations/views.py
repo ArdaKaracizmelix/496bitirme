@@ -429,7 +429,11 @@ class POIViewSet(viewsets.ModelViewSet):
             fallback_filters = {k: v for k, v in filters.items() if k != 'interests_only'}
             pois = GeoService.find_nearby(center, radius, fallback_filters)
 
-        serializer = POIListSerializer(pois[:120], many=True)
+        serializer = POIListSerializer(
+            pois[:120],
+            many=True,
+            context={'requested_interests': interests},
+        )
         return Response({
             'status': 'success',
             'city': city,
@@ -494,7 +498,11 @@ class POIViewSet(viewsets.ModelViewSet):
             pois = GeoService.find_nearby(center, radius, fallback_filters)
         _maybe_trigger_external_sync(lat, lon, pois.count())
         
-        serializer = POIListSerializer(pois, many=True)
+        serializer = POIListSerializer(
+            pois,
+            many=True,
+            context={'requested_interests': interests},
+        )
         return Response({
             'count': pois.count(),
             'results': serializer.data

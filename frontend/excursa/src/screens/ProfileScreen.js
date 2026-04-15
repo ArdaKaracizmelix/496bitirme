@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,10 @@ import {
   Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import { useUserPosts, useUserProfile } from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
+import SocialService from '../services/SocialService';
 
 const screenWidth = Dimensions.get('window').width;
 const itemWidth = (screenWidth - 3) / 3; // 3 columns with 1px gap
@@ -26,6 +28,7 @@ const itemWidth = (screenWidth - 3) / 3; // 3 columns with 1px gap
  */
 export default function ProfileScreen({ route }) {
   const navigation = useNavigation();
+  const queryClient = useQueryClient();
   const { user: currentUser } = useAuthStore();
   const logout = useAuthStore((state) => state.logout);
   const routeParams = route?.params || {};
@@ -55,6 +58,7 @@ export default function ProfileScreen({ route }) {
 
   const [activeTab, setActiveTab] = useState('grid'); // 'grid' or 'map'
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isFollowLoading, setIsFollowLoading] = useState(false);
 
   const posts = postsData?.results || [];
   const postsCount = postsData?.count ?? posts.length;
@@ -71,6 +75,12 @@ export default function ProfileScreen({ route }) {
     followers_count: profileData?.followers_count ?? currentUser?.followers_count ?? routeParams.followers_count ?? 0,
     following_count: profileData?.following_count ?? currentUser?.following_count ?? routeParams.following_count ?? 0,
   };
+
+  useEffect(() => {
+    if (!isOwnProfile && typeof profileData?.is_following === 'boolean') {
+      setIsFollowing(profileData.is_following);
+    }
+  }, [isOwnProfile, profileData?.is_following]);
 
   const handleLogout = () => {
     const runLogout = async () => {
@@ -109,11 +119,21 @@ export default function ProfileScreen({ route }) {
    * Handle follow/unfollow
    */
   const handleFollowToggle = async () => {
-    if (isOwnProfile) return;
+    if (isOwnProfile || isFollowLoading) return;
 
+    setIsFollowLoading(true);
     try {
-      setIsFollowing(!isFollowing);
-      // TODO: Call backend follow/unfollow API
+      if (isFollowing) {
+        await SocialService.unfollowUser(userId);
+      } else {
+        await SocialService.followUser(userId);
+      }
+
+      setIsFollowing((prev) => !prev);
+      refetchProfile();
+      queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+      queryClient.invalidateQueries({ queryKey: ['followList'] });
+
       Alert.alert(
         'Bilgi',
         isFollowing ? 'Artık bu kullanıcıyı takip etmiyorsunuz' : 'Takip edildi!',
@@ -121,8 +141,14 @@ export default function ProfileScreen({ route }) {
       );
     } catch (error) {
       Alert.alert('Hata', 'Takip işlemi başarısız oldu');
-      setIsFollowing(!isFollowing);
+    } finally {
+      setIsFollowLoading(false);
     }
+  };
+
+  const handleOpenFollowList = (type) => {
+    if (!userId) return;
+    navigation.navigate('FollowList', { userId, type });
   };
 
   /**
@@ -148,14 +174,14 @@ export default function ProfileScreen({ route }) {
             <Text style={styles.statNumber}>{postsCount}</Text>
             <Text style={styles.statLabel}>Gönderi</Text>
           </View>
-          <View style={styles.stat}>
+          <TouchableOpacity style={styles.stat} onPress={() => handleOpenFollowList('followers')}>
             <Text style={styles.statNumber}>{userProfile.followers_count}</Text>
             <Text style={styles.statLabel}>Takipçi</Text>
-          </View>
-          <View style={styles.stat}>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.stat} onPress={() => handleOpenFollowList('following')}>
             <Text style={styles.statNumber}>{userProfile.following_count}</Text>
             <Text style={styles.statLabel}>Takip</Text>
-          </View>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -207,11 +233,13 @@ export default function ProfileScreen({ route }) {
               style={[
                 styles.actionButton,
                 isFollowing && styles.followingButton,
+                isFollowLoading && styles.disabledButton,
               ]}
               onPress={handleFollowToggle}
+              disabled={isFollowLoading}
             >
               <Text style={isFollowing ? styles.followingButtonText : styles.actionButtonText}>
-                {isFollowing ? 'Takip Ediliyor' : 'Takip Et'}
+                {isFollowLoading ? 'İşleniyor...' : isFollowing ? 'Takip Ediliyor' : 'Takip Et'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -491,6 +519,9 @@ const styles = StyleSheet.create({
     color: '#1a1a2e',
     fontWeight: '600',
     fontSize: 14,
+  },
+  disabledButton: {
+    opacity: 0.7,
   },
   messageButton: {
     flex: 0,

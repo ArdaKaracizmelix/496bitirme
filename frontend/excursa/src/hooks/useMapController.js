@@ -130,7 +130,21 @@ export const useMapController = () => {
       try {
         // Prepare filters
         const userInterests = Array.isArray(user?.interests)
-          ? user.interests.filter((item) => typeof item === 'string' && item.trim().length > 0)
+          ? user.interests
+              .map((item) => {
+                if (typeof item === 'string') return item;
+                if (item && typeof item === 'object') {
+                  return item.name || item.title || '';
+                }
+                return '';
+              })
+              .map((value) =>
+                String(value || '')
+                  .trim()
+                  .toLowerCase()
+                  .replace(/[\s\-]+/g, '_')
+              )
+              .filter((item) => item.length > 0)
           : [];
         const effectiveFilters = filterOverrides || activeFilters;
         const filters = {};

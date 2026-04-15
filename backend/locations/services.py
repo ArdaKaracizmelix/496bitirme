@@ -23,7 +23,11 @@ class GeoService:
     @staticmethod
     def normalize_interest_values(interests: List[str]) -> List[str]:
         return [
-            str(item or '').strip().lower().replace('-', '_')
+            str(item or '')
+            .strip()
+            .lower()
+            .replace('-', '_')
+            .replace(' ', '_')
             for item in (interests or [])
             if str(item or '').strip()
         ]
@@ -43,7 +47,11 @@ class GeoService:
         category_map = {
             'HISTORICAL': {'historical', 'history', 'museum', 'monument', 'castle', 'cultural_landmark', 'historical_landmark', 'art_museum'},
             'NATURE': {'nature', 'park', 'national_park', 'state_park', 'beach', 'lake', 'mountain', 'woods', 'garden', 'botanical_garden', 'hiking_area', 'zoo', 'aquarium'},
-            'FOOD': {'food', 'restaurant', 'cafe', 'bar', 'bakery', 'coffee_shop', 'meal_takeaway', 'meal_delivery', 'ice_cream_shop'},
+            'FOOD': {
+                'food', 'restaurant', 'cafe', 'bar', 'bakery', 'coffee_shop',
+                'meal_takeaway', 'meal_delivery', 'ice_cream_shop',
+                'kebab_shop', 'kebab_restaurant', 'turkish_restaurant',
+            },
             'ENTERTAINMENT': {'entertainment', 'movie_theater', 'night_club', 'amusement_park', 'stadium', 'shopping_mall', 'theater', 'performing_arts_theater'},
         }
 
@@ -52,6 +60,21 @@ class GeoService:
         for category, keywords in category_map.items():
             if normalized.intersection(keywords):
                 matched.append(category)
+
+        # Heuristic fallback: infer FOOD from common place-type suffixes.
+        if 'FOOD' not in matched:
+            food_markers = (
+                '_restaurant',
+                '_cafe',
+                '_bakery',
+                '_bar',
+                'coffee_shop',
+                'ice_cream_shop',
+                'kebab_',
+                'meal_',
+            )
+            if any(any(marker in value for marker in food_markers) for value in normalized):
+                matched.append('FOOD')
         return matched
 
     @staticmethod
@@ -292,7 +315,7 @@ class ExternalSyncService:
                     'name': data.name,
                     'address': data.address,
                     'location': Point(data.lon, data.lat),
-                    'category': self.map_category(data.category),
+                    'category': self.map_category(data.category, data.tags),
                     'metadata': data.metadata,
                     'tags': self._normalize_tags(data.tags),
                 }
@@ -333,7 +356,7 @@ class ExternalSyncService:
             print(f"Error refreshing metadata for POI {poi.id}: {str(e)}")
             return False
     
-    def map_category(self, external_cat: str) -> str:
+    def map_category(self, external_cat: str, tags: Optional[List[str]] = None) -> str:
         """
         Normalizes external category strings to internal Enum values.
         
@@ -344,19 +367,44 @@ class ExternalSyncService:
             Internal POI.Category enum value
         """
 
+        normalized_cat = str(external_cat or '').strip().lower().replace('-', '_').replace(' ', '_')
+        normalized_tags = self._normalize_tags(tags or [])
+        signals = set([normalized_cat] + normalized_tags)
+
         # mapping can be expanded as we integrate more APIs and encounter more category variations
-        mapping = {
-            'historical_place': POI.Category.HISTORICAL,
-            'monument': POI.Category.HISTORICAL,
-            'museum': POI.Category.HISTORICAL,
-            'park': POI.Category.NATURE,
-            'natural_feature': POI.Category.NATURE,
-            'restaurant': POI.Category.FOOD,
-            'cafe': POI.Category.FOOD,
-            'amusement_park': POI.Category.ENTERTAINMENT,
-            'movie_theater': POI.Category.ENTERTAINMENT,
+        category_keywords = {
+            POI.Category.HISTORICAL: {
+                'historical_place', 'historical_landmark', 'history_museum', 'museum', 'monument',
+                'castle', 'art_gallery', 'art_museum', 'cultural_center', 'tourist_attraction',
+            },
+            POI.Category.NATURE: {
+                'park', 'national_park', 'state_park', 'natural_feature', 'beach', 'lake',
+                'mountain_peak', 'garden', 'botanical_garden', 'hiking_area', 'zoo', 'aquarium',
+            },
+            POI.Category.FOOD: {
+                'restaurant', 'cafe', 'coffee_shop', 'bakery', 'bar', 'meal_takeaway',
+                'meal_delivery', 'ice_cream_shop', 'kebab_shop', 'kebab_restaurant',
+                'turkish_restaurant', 'food', 'food_court',
+            },
+            POI.Category.ENTERTAINMENT: {
+                'amusement_park', 'movie_theater', 'night_club', 'stadium', 'shopping_mall',
+                'performing_arts_theater', 'theater', 'karaoke', 'casino',
+            },
         }
-        return mapping.get(external_cat.lower(), POI.Category.ENTERTAINMENT)
+
+        for category, keywords in category_keywords.items():
+            if signals.intersection(keywords):
+                return category
+
+        # Heuristic fallback to avoid over-biasing everything to ENTERTAINMENT.
+        if any(value.endswith('_restaurant') or 'kebab' in value for value in signals):
+            return POI.Category.FOOD
+        if any('park' in value or 'beach' in value for value in signals):
+            return POI.Category.NATURE
+        if any('museum' in value or 'historical' in value or 'monument' in value for value in signals):
+            return POI.Category.HISTORICAL
+
+        return POI.Category.ENTERTAINMENT
 
     def _normalize_tags(self, tags: List[str]) -> List[str]:
         normalized = []

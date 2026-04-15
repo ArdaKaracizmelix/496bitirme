@@ -5,7 +5,7 @@ from rest_framework.test import APITestCase
 from django.contrib.gis.geos import Point, Polygon
 from django.contrib.auth import get_user_model
 from .models import POI
-from .services import GeoService
+from .services import ExternalSyncService, GeoService
 
 User = get_user_model()
 
@@ -143,3 +143,16 @@ class POIAPITests(APITestCase):
         response = self.client.get(self.viewport_url, params)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 1)
+
+
+class ExternalSyncServiceTests(TestCase):
+    def setUp(self):
+        self.service = ExternalSyncService(google_api_key=None, fsq_api_key=None)
+
+    def test_map_category_uses_sub_interest_signals_for_food(self):
+        category = self.service.map_category('point_of_interest', ['kebab_shop', 'restaurant'])
+        self.assertEqual(category, POI.Category.FOOD)
+
+    def test_map_category_does_not_force_unknowns_to_entertainment_when_nature_signal_exists(self):
+        category = self.service.map_category('point_of_interest', ['national_park'])
+        self.assertEqual(category, POI.Category.NATURE)

@@ -24,6 +24,10 @@ export default function CommunityFeedScreen() {
   const navigation = useNavigation();
   const { user } = useAuthStore();
   const currentUserId = user?.id || user?.profile_id || user?.profile?.id;
+  const [activeFeedTab, setActiveFeedTab] = useState('following'); // following | global
+  const followingFeedQuery = useFeed('following');
+  const globalFeedQuery = useFeed('global');
+  const activeFeedQuery = activeFeedTab === 'global' ? globalFeedQuery : followingFeedQuery;
   const {
     data,
     isLoading,
@@ -33,7 +37,7 @@ export default function CommunityFeedScreen() {
     isFetchingNextPage,
     refetch,
     isRefetching,
-  } = useFeed();
+  } = activeFeedQuery;
 
   const toggleLikeMutation = useToggleLike();
   const deletePostMutation = useDeletePost();
@@ -45,12 +49,33 @@ export default function CommunityFeedScreen() {
   // Flatten the paginated data structure
   const posts = data?.pages?.flatMap((page) => page.results) || [];
 
+  const renderFeedTabs = () => (
+    <View style={styles.feedTabsContainer}>
+      <TouchableOpacity
+        style={[styles.feedTabButton, activeFeedTab === 'following' && styles.feedTabButtonActive]}
+        onPress={() => setActiveFeedTab('following')}
+      >
+        <Text style={[styles.feedTabLabel, activeFeedTab === 'following' && styles.feedTabLabelActive]}>
+          Following
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.feedTabButton, activeFeedTab === 'global' && styles.feedTabButtonActive]}
+        onPress={() => setActiveFeedTab('global')}
+      >
+        <Text style={[styles.feedTabLabel, activeFeedTab === 'global' && styles.feedTabLabelActive]}>
+          Global
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   // Handle refresh
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetch();
     setRefreshing(false);
-  }, [refetch]);
+  }, [refetch, activeFeedTab]);
 
   // Handle load more
   const handleLoadMore = useCallback(() => {
@@ -211,9 +236,12 @@ export default function CommunityFeedScreen() {
   // Render loading state
   if (isLoading) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#1a1a2e" />
-        <Text style={styles.loadingText}>Haberler yükleniyor...</Text>
+      <View style={styles.container}>
+        {renderFeedTabs()}
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#1a1a2e" />
+          <Text style={styles.loadingText}>Haberler yükleniyor...</Text>
+        </View>
       </View>
     );
   }
@@ -221,11 +249,14 @@ export default function CommunityFeedScreen() {
   // Render error state
   if (isError) {
     return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.errorText}>Haberleri yüklerken hata oluştu</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
-          <Text style={styles.retryButtonText}>Tekrar Deneyin</Text>
-        </TouchableOpacity>
+      <View style={styles.container}>
+        {renderFeedTabs()}
+        <View style={styles.centerContainer}>
+          <Text style={styles.errorText}>Haberleri yüklerken hata oluştu</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
+            <Text style={styles.retryButtonText}>Tekrar Deneyin</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -233,20 +264,27 @@ export default function CommunityFeedScreen() {
   // Render empty state
   if (posts.length === 0) {
     return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.emptyText}>Henüz hiç gönderi yok</Text>
-        <TouchableOpacity
-          style={styles.createButton}
-          onPress={() => navigation.navigate('CreatePost')}
-        >
-          <Text style={styles.createButtonText}>İlk Gönderini Oluştur</Text>
-        </TouchableOpacity>
+      <View style={styles.container}>
+        {renderFeedTabs()}
+        <View style={styles.centerContainer}>
+          <Text style={styles.emptyText}>
+            {activeFeedTab === 'following' ? 'Takip ettiğin hesaplardan gönderi yok' : 'Henüz hiç gönderi yok'}
+          </Text>
+          <TouchableOpacity
+            style={styles.createButton}
+            onPress={() => navigation.navigate('CreatePost')}
+          >
+            <Text style={styles.createButtonText}>İlk Gönderini Oluştur</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      {renderFeedTabs()}
+
       <FlatList
         data={posts}
         keyExtractor={(item) => item.id?.toString()}
@@ -374,6 +412,38 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  feedTabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fff',
+  },
+  feedTabButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#d8d8d8',
+    backgroundColor: '#fff',
+    marginHorizontal: 4,
+  },
+  feedTabButtonActive: {
+    backgroundColor: '#1a1a2e',
+    borderColor: '#1a1a2e',
+  },
+  feedTabLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1a1a2e',
+  },
+  feedTabLabelActive: {
+    color: '#fff',
   },
   centerContainer: {
     flex: 1,

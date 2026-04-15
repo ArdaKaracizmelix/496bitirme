@@ -112,6 +112,9 @@ class UserAPITests(APITestCase):
         response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(self.profile1.is_following(self.profile2))
+        profile_response = self.client.get(reverse('profile', args=[self.profile2.id]))
+        self.assertEqual(profile_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(profile_response.data.get('is_following'))
 
     def test_unfollow_endpoint(self):
         """Test the unfollow API endpoint."""
@@ -140,9 +143,29 @@ class UserAPITests(APITestCase):
     def test_unfollow_not_following(self):
         """Test that unfollowing someone you don't follow does nothing."""
         self.profile1.unfollow(self.profile2)
-        
+
         self.profile1.refresh_from_db()
         self.assertEqual(self.profile1.following_count, 0)
+
+    def test_followers_and_following_list_endpoints(self):
+        """Followers/following list endpoints should return expected profiles."""
+        self.profile1.follow(self.profile2)
+
+        followers_response = self.client.get(reverse('followers_list', args=[self.profile2.id]))
+        following_response = self.client.get(reverse('following_list', args=[self.profile1.id]))
+
+        self.assertEqual(followers_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(following_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(followers_response.data.get('results', [])), 1)
+        self.assertEqual(len(following_response.data.get('results', [])), 1)
+        self.assertEqual(
+            followers_response.data['results'][0]['id'],
+            str(self.profile1.id),
+        )
+        self.assertEqual(
+            following_response.data['results'][0]['id'],
+            str(self.profile2.id),
+        )
 
 
 class EmailVerificationAuthTests(APITestCase):

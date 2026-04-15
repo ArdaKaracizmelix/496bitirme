@@ -31,11 +31,21 @@ class SocialService {
   }
 
   /**
-   * Fetch the home feed for the current user
-   * Returns posts from followed users with pagination
+   * Fetch feed by mode.
+   * mode='following' -> /community/posts/feed/
+   * mode='global' -> /community/posts/
    */
-  async fetchFeed(cursor = null, limit = 10) {
+  async fetchFeed(mode = 'following', cursor = null, limit = 10) {
     try {
+      if (mode === 'global') {
+        const params = { limit };
+        if (typeof cursor === 'number') {
+          params.skip = cursor;
+        }
+        const response = await api.get('/community/posts/', { params });
+        return this.normalizeFeedResponse(response.data);
+      }
+
       const params = { limit };
       if (cursor) {
         params.cursor = cursor;
@@ -53,7 +63,7 @@ class SocialService {
         return this.normalizeFeedResponse(response.data);
       }
     } catch (error) {
-      console.error('Error fetching feed:', error);
+      console.error(`Error fetching ${mode} feed:`, error);
       throw error;
     }
   }
@@ -68,6 +78,46 @@ class SocialService {
       return response.data;
     } catch (error) {
       console.error(`Error fetching profile${userId ? ` for user ${userId}` : ''}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Follow a user profile by id
+   */
+  async followUser(userId) {
+    try {
+      const response = await api.post(`/user/${userId}/follow/`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error following user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Unfollow a user profile by id
+   */
+  async unfollowUser(userId) {
+    try {
+      const response = await api.post(`/user/${userId}/unfollow/`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error unfollowing user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch followers/following list for a user profile
+   */
+  async fetchFollowList(userId, type = 'followers') {
+    try {
+      const endpoint = type === 'following' ? 'following' : 'followers';
+      const response = await api.get(`/user/${userId}/${endpoint}/`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching ${type} list for user ${userId}:`, error);
       throw error;
     }
   }
