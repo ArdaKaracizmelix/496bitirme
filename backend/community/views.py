@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
+from mongoengine.queryset.visitor import Q
 from .models import SocialPost
 from .serializers import (
     PostDTO, SocialPostCreateSerializer, SocialPostUpdateSerializer,
@@ -25,21 +26,38 @@ class SocialPostViewSet(viewsets.ViewSet):
     
     permission_classes = [AllowAny]
     service = FeedService()
+
+    def _viewer_profile_id(self, request):
+        if request.user.is_authenticated:
+            return request.user.profile.id
+        return None
     
     def list(self, request):
-        """List recent public posts."""
+        """List recent public posts with pagination."""
         limit = int(request.query_params.get('limit', 10))
         skip = int(request.query_params.get('skip', 0))
         
-        posts = SocialPost.get_recent_posts(limit=limit, skip=skip)
+        posts = SocialPost.get_recent_posts(limit=limit + 1, skip=skip)  # Get one more to determine next page
+        post_list = list(posts)
+        
+        has_next = len(post_list) > limit
+        if has_next:
+            post_list = post_list[:limit]
         
         serializer = PostDTO(
-            [self.service._post_to_dto(p) for p in posts],
+            [self.service._post_to_dto(p, current_user_id=self._viewer_profile_id(request)) for p in post_list],
             many=True
         )
+        
+        # Generate next page cursor
+        next_cursor = None
+        if has_next and len(post_list) > 0:
+            next_cursor = skip + limit
+        
         return Response({
             'count': len(serializer.data),
-            'results': serializer.data
+            'results': serializer.data,
+            'nextPageCursor': next_cursor
         })
     
     def create(self, request):
@@ -57,7 +75,7 @@ class SocialPostViewSet(viewsets.ViewSet):
         
         if serializer.is_valid():
             post = serializer.save()
-            response = PostDTO(self.service._post_to_dto(post))
+            response = PostDTO(self.service._post_to_dto(post, current_user_id=self._viewer_profile_id(request)))
             return Response(response.data, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -72,7 +90,7 @@ class SocialPostViewSet(viewsets.ViewSet):
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            serializer = PostDTO(self.service._post_to_dto(post))
+            serializer = PostDTO(self.service._post_to_dto(post, current_user_id=self._viewer_profile_id(request)))
             return Response(serializer.data)
         except Exception as e:
             return Response(
@@ -118,7 +136,7 @@ class SocialPostViewSet(viewsets.ViewSet):
                     post.visibility = serializer.validated_data['visibility']
                 
                 post.save()
-                response = PostDTO(self.service._post_to_dto(post))
+                response = PostDTO(self.service._post_to_dto(post, current_user_id=self._viewer_profile_id(request)))
                 return Response(response.data)
             
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -163,9 +181,12 @@ class SocialPostViewSet(viewsets.ViewSet):
         
         user_profile = request.user.profile
         
-        # Get list of users this profile is following
-        following_profiles = user_profile.following.all().values_list('id', flat=True)
-        following_ids = list(following_profiles)
+        # Get list of users this profile is following from the explicit relation table.
+        # This avoids any ambiguity in many-to-many resolution and is safer for visibility checks.
+        from user.models import FollowRelation
+        following_ids = list(
+            FollowRelation.objects.filter(follower=user_profile).values_list('following_id', flat=True)
+        )
         
         # Add self to get own posts too
         following_ids.append(user_profile.id)
@@ -193,7 +214,11 @@ class SocialPostViewSet(viewsets.ViewSet):
         interest = request.query_params.get('interest', 'popular')
         limit = int(request.query_params.get('limit', 10))
         
-        posts = self.service.get_explore_feed(interest, limit)
+        posts = self.service.get_explore_feed(
+            interest,
+            limit,
+            current_user_id=self._viewer_profile_id(request)
+        )
         
         serializer = PostDTO(posts, many=True)
         return Response({
@@ -209,7 +234,10 @@ class SocialPostViewSet(viewsets.ViewSet):
         """
         limit = int(request.query_params.get('limit', 10))
         
-        posts = self.service.get_trending_posts(limit)
+        posts = self.service.get_trending_posts(
+            limit,
+            current_user_id=self._viewer_profile_id(request)
+        )
         
         serializer = PostDTO(posts, many=True)
         return Response({
@@ -217,7 +245,48 @@ class SocialPostViewSet(viewsets.ViewSet):
             'results': serializer.data
         })
     
-    @action(detail='pk', methods=['post'])
+    @action(detail=False, methods=['get'])
+    def search(self, request):
+        """
+        Search posts by query string.
+        Searches in content and tags.
+        """
+        query = request.query_params.get('q', '')
+        limit = int(request.query_params.get('limit', 10))
+        skip = int(request.query_params.get('skip', 0))
+        
+        if not query:
+            return Response({
+                'results': [],
+                'count': 0
+            })
+        
+        try:
+            # Search in content or tags (case-insensitive)
+            posts = SocialPost.objects(
+                visibility=SocialPost.Visibility.PUBLIC
+            ).filter(
+                Q(content__icontains=query) | Q(tags__icontains=query.lower())
+            ).order_by('-created_at').skip(skip).limit(limit)
+            
+            serializer = PostDTO(
+                [self.service._post_to_dto(p, current_user_id=self._viewer_profile_id(request)) for p in posts],
+                many=True
+            )
+            return Response({
+                'query': query,
+                'count': len(serializer.data),
+                'results': serializer.data
+            })
+        except Exception as e:
+            return Response({
+                'error': str(e),
+                'results': [],
+                'count': 0
+            })
+    
+    
+    @action(detail=True, methods=['post'])
     def add_comment(self, request, pk=None):
         """Add a comment to a post."""
         if not request.user.is_authenticated:
@@ -237,7 +306,7 @@ class SocialPostViewSet(viewsets.ViewSet):
             serializer = AddCommentSerializer(data=request.data)
             if serializer.is_valid():
                 post.add_comment(request.user.profile.id, serializer.validated_data['text'])
-                response = PostDTO(self.service._post_to_dto(post))
+                response = PostDTO(self.service._post_to_dto(post, current_user_id=self._viewer_profile_id(request)))
                 return Response(response.data)
             
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -247,7 +316,7 @@ class SocialPostViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
     
-    @action(detail='pk', methods=['post'])
+    @action(detail=True, methods=['post'])
     def toggle_like(self, request, pk=None):
         """Toggle a like on a post."""
         if not request.user.is_authenticated:
@@ -268,7 +337,41 @@ class SocialPostViewSet(viewsets.ViewSet):
             
             return Response({
                 'liked': liked,
-                'post': self.service._post_to_dto(post)
+                'post': self.service._post_to_dto(post, current_user_id=self._viewer_profile_id(request))
+            })
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=True, methods=['get'])
+    def comments(self, request, pk=None):
+        """Get comments for a post."""
+        limit = int(request.query_params.get('limit', 20))
+        skip = int(request.query_params.get('skip', 0))
+        
+        try:
+            post = SocialPost.objects(id=pk).first()
+            if not post:
+                return Response(
+                    {'error': 'Post not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get comments with pagination
+            comments = post.comments[skip:skip + limit]
+            
+            return Response({
+                'total_count': len(post.comments),
+                'count': len(comments),
+                'results': [
+                    {
+                        'user_id': str(c.user_id),
+                        'text': c.text,
+                        'timestamp': c.timestamp.isoformat()
+                    } for c in comments
+                ]
             })
         except Exception as e:
             return Response(
@@ -282,6 +385,11 @@ class UserPostsView(APIView):
     
     permission_classes = [AllowAny]
     service = FeedService()
+
+    def _viewer_profile_id(self, request):
+        if request.user.is_authenticated:
+            return request.user.profile.id
+        return None
     
     def get(self, request, user_id):
         """Get all public posts by a user."""
@@ -295,7 +403,7 @@ class UserPostsView(APIView):
             ).order_by('-created_at').skip(skip).limit(limit)
             
             serializer = PostDTO(
-                [self.service._post_to_dto(p) for p in posts],
+                [self.service._post_to_dto(p, current_user_id=self._viewer_profile_id(request)) for p in posts],
                 many=True
             )
             

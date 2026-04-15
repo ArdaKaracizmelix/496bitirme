@@ -25,6 +25,13 @@ class Itinerary(models.Model):
         PRIVATE = 'PRIVATE', 'Private'
         PUBLIC = 'PUBLIC', 'Public'
 
+    class TransportMode(models.TextChoices):
+        """Enum for preferred trip transportation"""
+        DRIVING = 'DRIVING', 'Driving'
+        WALKING = 'WALKING', 'Walking'
+        CYCLING = 'CYCLING', 'Cycling'
+        TRANSIT = 'TRANSIT', 'Transit'
+
     # Primary Key
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -62,6 +69,12 @@ class Itinerary(models.Model):
         choices=Visibility.choices,
         default=Visibility.PRIVATE,
         help_text="PRIVATE (default), PUBLIC (shared on feed)"
+    )
+    transport_mode = models.CharField(
+        max_length=20,
+        choices=TransportMode.choices,
+        default=TransportMode.DRIVING,
+        help_text="Preferred transportation mode for route planning"
     )
 
     # Cost Management

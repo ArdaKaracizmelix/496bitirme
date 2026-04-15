@@ -7,8 +7,9 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
-from django.db import transaction
+from django.db import transaction, models
 from .models import Itinerary, ItineraryItem
 from .serializers import (
     ItinerarySerializer,
@@ -16,7 +17,9 @@ from .serializers import (
     ItineraryItemSerializer,
     ItineraryCloneSerializer,
     ItineraryShareLinkSerializer,
+    ItineraryGenerateRequestSerializer,
 )
+from locations.serializers import POIListSerializer
 
 
 class ItineraryViewSet(viewsets.ModelViewSet):
@@ -101,6 +104,8 @@ class ItineraryViewSet(viewsets.ModelViewSet):
             return ItineraryCloneSerializer
         elif self.action == 'generate_share_link':
             return ItineraryShareLinkSerializer
+        elif self.action == 'generate_from_preferences':
+            return ItineraryGenerateRequestSerializer
         return ItinerarySerializer
 
     def get_permissions(self):
@@ -253,7 +258,273 @@ class ItineraryViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    @action(detail=False, methods=['get'])
+    @action(detail=True, methods=['post'])
+    def add_stop(self, request, pk=None):
+        """
+        Add a POI stop to this itinerary.
+        
+        Request body:
+        {
+            "poi_id": "uuid-of-poi",
+            "order_index": 2 (optional, defaults to end of list)
+        }
+        """
+        itinerary = self.get_object()
+        
+        # Only owner can add stops
+        if itinerary.user != request.user:
+            return Response(
+                {'error': 'You can only modify your own itineraries'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        from locations.models import POI
+        
+        poi_id = request.data.get('poi_id')
+        order_index = request.data.get('order_index')
+        
+        if not poi_id:
+            return Response(
+                {'error': 'poi_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            poi = POI.objects.get(id=poi_id)
+        except POI.DoesNotExist:
+            return Response(
+                {'error': f'POI with id {poi_id} not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # If order_index not provided, add at end
+        if order_index is None:
+            max_index = itinerary.itineraryitem_set.aggregate(
+                max_order=models.Max('order_index')
+            )['max_order']
+            order_index = (max_index or -1) + 1
+        
+        try:
+            item = ItineraryItem.objects.create(
+                itinerary=itinerary,
+                poi=poi,
+                order_index=order_index,
+            )
+            serializer = ItinerarySerializer(itinerary, context={'request': request})
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to add stop: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=True, methods=['patch'])
+    def reorder_stops(self, request, pk=None):
+        """
+        Reorder stops in this itinerary.
+        
+        Request body:
+        {
+            "stops": [
+                {"id": "item-uuid-1", "order_index": 0},
+                {"id": "item-uuid-2", "order_index": 1},
+                ...
+            ]
+        }
+        """
+        itinerary = self.get_object()
+        
+        # Only owner can reorder
+        if itinerary.user != request.user:
+            return Response(
+                {'error': 'You can only modify your own itineraries'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        stops_data = request.data.get('stops', [])
+        
+        if not stops_data:
+            return Response(
+                {'error': 'stops list is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            with transaction.atomic():
+                # Create a map of updates
+                updates = {}
+                for stop_item in stops_data:
+                    item_id = stop_item.get('id')
+                    new_order = stop_item.get('order_index')
+                    if item_id is None or new_order is None:
+                        return Response(
+                            {'error': 'Each stop must have id and order_index'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    updates[str(item_id)] = int(new_order)
+                
+                # Fetch all items to be updated
+                items = list(ItineraryItem.objects.filter(id__in=updates.keys(), itinerary_id=itinerary.id))
+                if len(items) != len(updates):
+                    return Response(
+                        {'error': 'One or more stop ids are invalid for this itinerary'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Move to temporary positions to avoid unique constraint collisions
+                for item in items:
+                    item.order_index = updates[str(item.id)] + 100000
+                    item.save(update_fields=['order_index'])
+                
+                # Move to final positions
+                for item in items:
+                    item.order_index = updates[str(item.id)]
+                    item.save(update_fields=['order_index'])
+            
+            serializer = self.get_serializer(itinerary)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to reorder stops: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=True, methods=['post'])
+    def export_to_calendar(self, request, pk=None):
+        """
+        Export trip to device calendar.
+        Currently returns success - actual calendar integration depends on frontend.
+        """
+        itinerary = self.get_object()
+        
+        # Can only export own itineraries
+        if itinerary.user != request.user:
+            return Response(
+                {'error': 'You can only export your own itineraries'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            return Response({
+                'status': 'success',
+                'message': 'Trip exported to calendar',
+                'trip_id': itinerary.id,
+                'title': itinerary.title,
+                'start_date': itinerary.start_date,
+                'end_date': itinerary.end_date,
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to export to calendar: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=True, methods=['get'])
+    def summary(self, request, pk=None):
+        """
+        Get summary information about this itinerary.
+        Includes basic info and statistics.
+        """
+        itinerary = self.get_object()
+        
+        stops = itinerary.itineraryitem_set.all().order_by('order_index')
+        stop_count = stops.count()
+        
+        # Calculate rough metrics
+        total_cost = itinerary.estimated_cost or 0
+        
+        return Response({
+            'id': itinerary.id,
+            'title': itinerary.title,
+            'start_date': itinerary.start_date,
+            'end_date': itinerary.end_date,
+            'status': itinerary.status,
+            'visibility': itinerary.visibility,
+            'stops_count': stop_count,
+            'estimated_cost': total_cost,
+            'stops': ItineraryItemSerializer(stops, many=True).data,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def generate_from_preferences(self, request):
+        """
+        Generate a city-based itinerary from duration and interests.
+
+        Request body:
+        {
+            "city": "Istanbul",
+            "duration_days": 3,
+            "interests": ["historical", "food"],
+            "start_date": "2026-04-13",  // optional, defaults to today
+            "title": "My Istanbul Trip", // optional
+            "visibility": "PRIVATE",     // optional
+            "transport_mode": "DRIVING", // optional
+            "stops_per_day": 4           // optional
+        }
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+
+        city = payload['city']
+        duration_days = payload['duration_days']
+        interests = payload.get('interests', [])
+        start_date = payload.get('start_date') or timezone.localdate()
+        title = payload.get('title') or f"{city} {duration_days}-Day Trip"
+        visibility = payload.get('visibility', Itinerary.Visibility.PRIVATE)
+        transport_mode = payload.get('transport_mode', Itinerary.TransportMode.DRIVING)
+        stops_per_day = payload.get('stops_per_day', 4)
+
+        from .services import TripGenerationService
+
+        try:
+            result = TripGenerationService().generate_itinerary(
+                user=request.user,
+                city=city,
+                duration_days=duration_days,
+                interests=interests,
+                start_date=start_date,
+                title=title,
+                visibility=visibility,
+                transport_mode=transport_mode,
+                stops_per_day=stops_per_day,
+            )
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response(
+                {'error': f'Failed to generate itinerary: {str(exc)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        itinerary = result['itinerary']
+        itinerary_data = ItinerarySerializer(itinerary, context={'request': request}).data
+        day_plan_response = [
+            {
+                'day': item['day'],
+                'date': item['date'],
+                'stops_count': item['stops_count'],
+                'stops': POIListSerializer(item['stops'], many=True).data,
+            }
+            for item in result['day_plan']
+        ]
+
+        return Response(
+            {
+                'itinerary': itinerary_data,
+                'summary': {
+                    'city': city,
+                    'duration_days': duration_days,
+                    'interests': interests,
+                    'start_date': start_date.isoformat(),
+                    'stops_per_day': stops_per_day,
+                    'candidate_pois_count': result['candidate_pois_count'],
+                    'selected_pois_count': result['selected_pois_count'],
+                },
+                'day_plan': day_plan_response,
+            },
+            status=status.HTTP_201_CREATED,
+        )
     def my_itineraries(self, request):
         """
         Get all itineraries belonging to the current user.

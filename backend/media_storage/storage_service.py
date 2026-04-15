@@ -10,6 +10,8 @@ import uuid
 from typing import Optional
 import boto3
 from botocore.exceptions import ClientError
+from django.conf import settings
+from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import InMemoryUploadedFile
 
 
@@ -42,14 +44,19 @@ class StorageService:
         """
         self.bucket_name = bucket_name or os.getenv('AWS_STORAGE_BUCKET_NAME', 'excursa-uploads')
         self.region = region or os.getenv('AWS_S3_REGION_NAME', 'us-east-1')
+        self.aws_access_key_id = aws_access_key_id or os.getenv('AWS_ACCESS_KEY_ID')
+        self.aws_secret_access_key = aws_secret_access_key or os.getenv('AWS_SECRET_ACCESS_KEY')
+        self.use_local_storage = not (self.aws_access_key_id and self.aws_secret_access_key)
         
         # Create S3 client with boto3
-        self.s3_client = boto3.client(
-            's3',
-            region_name=self.region,
-            aws_access_key_id=aws_access_key_id or os.getenv('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=aws_secret_access_key or os.getenv('AWS_SECRET_ACCESS_KEY')
-        )
+        self.s3_client = None
+        if not self.use_local_storage:
+            self.s3_client = boto3.client(
+                's3',
+                region_name=self.region,
+                aws_access_key_id=self.aws_access_key_id,
+                aws_secret_access_key=self.aws_secret_access_key
+            )
         
         # Optional CloudFront domain for serving images faster
         self.cdn_domain = cdn_domain or os.getenv('AWS_CDN_DOMAIN')
@@ -73,6 +80,9 @@ class StorageService:
         Raises:
             ClientError: If S3 upload fails
         """
+        if self.use_local_storage:
+            return self._upload_local_file(file_obj, path=path)
+
         try:
             # Generate unique filename with UUID
             file_ext = os.path.splitext(file_obj.name)[1]
@@ -87,7 +97,6 @@ class StorageService:
                 self.bucket_name,
                 s3_key,
                 ExtraArgs={
-                    'ACL': 'public-read',
                     'ContentType': file_obj.content_type
                 }
             )
@@ -105,6 +114,14 @@ class StorageService:
                 {'Error': {'Code': str(e), 'Message': f'Failed to upload file: {str(e)}'}},
                 'PutObject'
             )
+
+    def _upload_local_file(self, file_obj: InMemoryUploadedFile, path: str = '') -> str:
+        file_ext = os.path.splitext(file_obj.name)[1] or '.jpg'
+        unique_filename = f"{uuid.uuid4()}{file_ext}"
+        clean_path = path.strip('/')
+        relative_path = f"{clean_path}/{unique_filename}" if clean_path else unique_filename
+        saved_path = default_storage.save(relative_path, file_obj)
+        return f"{settings.MEDIA_URL}{saved_path}".replace('\\', '/')
     
     def delete_file(self, file_url: str) -> bool:
         """

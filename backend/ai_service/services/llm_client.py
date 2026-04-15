@@ -1,0 +1,45 @@
+import os
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class LLMClient:
+    def __init__(self):
+        self.api_key = os.getenv("LLM_API_KEY")
+        self.api_url = os.getenv("LLM_API_URL")
+        self.model = os.getenv("LLM_MODEL")
+
+        if not self.api_key:
+            raise ValueError("LLM_API_KEY bulunamadı.")
+        if not self.api_url:
+            raise ValueError("LLM_API_URL bulunamadı.")
+        if not self.model:
+            raise ValueError("LLM_MODEL bulunamadı.")
+
+    def generate_response(self, messages):
+        url = f"{self.api_url}/chat/completions"
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 300
+        }
+
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+        return data["choices"][0]["message"]["content"]

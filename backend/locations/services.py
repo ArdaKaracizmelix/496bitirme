@@ -7,7 +7,8 @@ import requests
 from typing import Dict, List, Optional, Tuple
 from django.contrib.gis.geos import Point, Polygon
 from django.contrib.gis.measure import Distance
-from django.db.models import QuerySet
+from django.db.models import QuerySet, Case, When, Value, IntegerField
+from django.db.models import Q
 from django.conf import settings
 from .models import POI
 
@@ -19,6 +20,40 @@ class GeoService:
     with a clean API rather than raw ORM/SQL calls.
     """
     
+    @staticmethod
+    def normalize_interest_values(interests: List[str]) -> List[str]:
+        return [
+            str(item or '').strip().lower().replace('-', '_')
+            for item in (interests or [])
+            if str(item or '').strip()
+        ]
+
+    @staticmethod
+    def build_interest_tag_query(interest_values: List[str]) -> Q:
+        query = Q()
+        for value in (interest_values or []):
+            query |= Q(tags__contains=[value])
+        return query
+
+    @staticmethod
+    def _map_interests_to_categories(interests: List[str]) -> List[str]:
+        """
+        Map user interest labels/types to internal POI category enums.
+        """
+        category_map = {
+            'HISTORICAL': {'historical', 'history', 'museum', 'monument', 'castle', 'cultural_landmark', 'historical_landmark', 'art_museum'},
+            'NATURE': {'nature', 'park', 'national_park', 'state_park', 'beach', 'lake', 'mountain', 'woods', 'garden', 'botanical_garden', 'hiking_area', 'zoo', 'aquarium'},
+            'FOOD': {'food', 'restaurant', 'cafe', 'bar', 'bakery', 'coffee_shop', 'meal_takeaway', 'meal_delivery', 'ice_cream_shop'},
+            'ENTERTAINMENT': {'entertainment', 'movie_theater', 'night_club', 'amusement_park', 'stadium', 'shopping_mall', 'theater', 'performing_arts_theater'},
+        }
+
+        normalized = set(GeoService.normalize_interest_values(interests))
+        matched = []
+        for category, keywords in category_map.items():
+            if normalized.intersection(keywords):
+                matched.append(category)
+        return matched
+
     @staticmethod
     def find_nearby(center: Point, radius_m: int, filters: Optional[Dict] = None) -> QuerySet:
         """
@@ -45,7 +80,37 @@ class GeoService:
         
         if 'min_rating' in filters:
             queryset = queryset.filter(average_rating__gte=filters['min_rating'])
-        
+
+        # Soft personalization: boost interest-matching categories without hard filtering.
+        interest_values = GeoService.normalize_interest_values(filters.get('interests', []))
+        interest_categories = GeoService._map_interests_to_categories(interest_values)
+        tag_match_query = GeoService.build_interest_tag_query(interest_values)
+        interests_only = bool(filters.get('interests_only'))
+
+        if interests_only and (interest_values or interest_categories) and 'category' not in filters:
+            strict_query = Q()
+            if interest_categories:
+                strict_query |= Q(category__in=interest_categories)
+            if interest_values:
+                strict_query |= tag_match_query
+            queryset = queryset.filter(strict_query)
+            return queryset.order_by('-average_rating')
+
+        if (interest_values or interest_categories) and 'category' not in filters:
+            queryset = queryset.annotate(
+                interest_tag_rank=Case(
+                    When(tag_match_query, then=Value(0)),
+                    default=Value(1),
+                    output_field=IntegerField(),
+                ),
+                interest_rank=Case(
+                    When(category__in=interest_categories, then=Value(0)),
+                    default=Value(1),
+                    output_field=IntegerField(),
+                )
+            ).order_by('interest_tag_rank', 'interest_rank', '-average_rating')
+            return queryset
+
         return queryset.order_by('-average_rating')
     
     @staticmethod
@@ -229,7 +294,7 @@ class ExternalSyncService:
                     'location': Point(data.lon, data.lat),
                     'category': self.map_category(data.category),
                     'metadata': data.metadata,
-                    'tags': data.tags,
+                    'tags': self._normalize_tags(data.tags),
                 }
             )
             return poi if created else None
@@ -292,6 +357,15 @@ class ExternalSyncService:
             'movie_theater': POI.Category.ENTERTAINMENT,
         }
         return mapping.get(external_cat.lower(), POI.Category.ENTERTAINMENT)
+
+    def _normalize_tags(self, tags: List[str]) -> List[str]:
+        normalized = []
+        for item in tags or []:
+            value = str(item or '').strip().lower().replace('-', '_').replace(' ', '_')
+            if value:
+                normalized.append(value)
+        # Keep deterministic unique order
+        return list(dict.fromkeys(normalized))
     
     # Private helper methods
     
@@ -341,36 +415,40 @@ class ExternalSyncService:
     
     def _parse_google_place(self, place_data: Dict) -> 'ExternalPlaceDTO':
         """Parse Google Places API response"""
+        place_types = place_data.get('types', [])
         return ExternalPlaceDTO(
             external_id=place_data.get('place_id'),
             name=place_data.get('name'),
             address=place_data.get('vicinity'),
             lat=place_data['geometry']['location']['lat'],
             lon=place_data['geometry']['location']['lng'],
-            category=place_data.get('types', ['other'])[0],
+            category=(place_types[0] if place_types else 'other'),
             metadata={
                 'rating': place_data.get('rating'),
                 'user_ratings_total': place_data.get('user_ratings_total'),
                 'photo_url': place_data.get('photos', [{}])[0].get('photo_reference'),
             },
-            tags=place_data.get('types', []),
+            tags=self._normalize_tags(place_types),
         )
     
     def _parse_fsq_place(self, place_data: Dict) -> 'ExternalPlaceDTO':
         """Parse Foursquare API response"""
         location = place_data.get('location', {})
+        categories = place_data.get('categories', [])
+        primary_category = categories[0].get('name', 'other') if categories else 'other'
+        category_tags = [c.get('name') for c in categories]
         return ExternalPlaceDTO(
             external_id=place_data.get('fsq_id'),
             name=place_data.get('name'),
             address=location.get('formatted_address'),
             lat=location.get('lat', 0),
             lon=location.get('lon', 0),
-            category=place_data.get('categories', [{}])[0].get('name', 'other'),
+            category=primary_category,
             metadata={
                 'rating': place_data.get('rating'),
                 'distance': place_data.get('distance'),
             },
-            tags=[c.get('name') for c in place_data.get('categories', [])],
+            tags=self._normalize_tags(category_tags),
         )
     
     # function still needs to be implemented 

@@ -133,3 +133,33 @@ class POI(models.Model):
         if self.location:
             return (self.location.y, self.location.x)
         return None
+
+
+class SavedPOI(models.Model):
+    """
+    Tracks which POIs are saved/favorited by users.
+    Used for "My Favorites" feature and user preferences.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        'user.UserProfile',
+        on_delete=models.CASCADE,
+        related_name='saved_pois'
+    )
+    poi = models.ForeignKey(
+        POI,
+        on_delete=models.CASCADE,
+        related_name='saved_by_users'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'locations_saved_poi'
+        unique_together = ('user', 'poi')
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.user.username} saved {self.poi.name}"
+

@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 # Load environment variables from .env file
@@ -18,7 +19,8 @@ try:
     from dotenv import load_dotenv
     env_path = Path(__file__).resolve().parent.parent / '.env'
     if env_path.exists():
-        load_dotenv(env_path)
+        # Ensure backend/.env is the single source of truth in local dev.
+        load_dotenv(env_path, override=True)
 except ImportError:
     # If python-dotenv is not installed, os.getenv() will still work
     # but will only read from actual environment variables
@@ -26,6 +28,14 @@ except ImportError:
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+try:
+    from dotenv import load_dotenv
+    root_env_path = BASE_DIR.parent / '.env'
+    if root_env_path.exists():
+        load_dotenv(root_env_path, override=False)
+except ImportError:
+    pass
 
 
 # Quick-start development settings - unsuitable for production
@@ -52,9 +62,11 @@ INSTALLED_APPS = [
     'rest_framework',
     # GIS support
     'django.contrib.gis',
+    # Infrastructure
+    'infra.apps.InfraConfig',
     # Local apps
     'core',
-    'user',
+    'user.apps.UserConfig',
     'locations',
     'recommendations',
     'community',
@@ -62,9 +74,13 @@ INSTALLED_APPS = [
     'trips',
     'task_queue',
     'media_storage',
+    'ai_service',
+    'corsheaders',
+    'rest_framework_simplejwt',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -181,8 +197,14 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "infra.authentication.RedisAwareJWTAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
@@ -193,6 +215,18 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 10,
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(
+        minutes=int(os.getenv("JWT_ACCESS_TOKEN_LIFETIME_MINUTES", "15"))
+    ),
+    "REFRESH_TOKEN_LIFETIME": timedelta(
+        days=int(os.getenv("JWT_REFRESH_TOKEN_LIFETIME_DAYS", "7"))
+    ),
+    "ROTATE_REFRESH_TOKENS": os.getenv("JWT_ROTATE_REFRESH_TOKENS", "False").lower() == "true",
+    "BLACKLIST_AFTER_ROTATION": False,
+    "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
 # External API Keys (loaded from environment variables)
@@ -250,6 +284,7 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@excursa.com')
 
 # Redis Configuration
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+REDIS_KEY_PREFIX = os.getenv('REDIS_KEY_PREFIX', 'excursa')
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
@@ -266,3 +301,10 @@ AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID', '')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY', '')
 AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', 'us-east-1')
 AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME', 'excursa-uploads')
+
+# CORS Configuration
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:8081",  # Expo
+    "http://localhost:19006", # Expo Web
+    "http://192.168.1.3:8081", # Local LAN Expo Web
+]
