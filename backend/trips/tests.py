@@ -244,6 +244,65 @@ class ItineraryAPITest(APITestCase):
             self.assertEqual(item2.order_index, 0)
             self.assertEqual(item1.order_index, 1)
 
+    def test_generate_from_preferences_creates_itinerary(self):
+        """Test AI-style itinerary generation using city, duration and interests."""
+        POI.objects.create(
+            name='Hagia Sophia',
+            address='Sultanahmet, Istanbul',
+            location=Point(28.9802, 41.0086),
+            category=POI.Category.HISTORICAL,
+            average_rating=4.8,
+            tags=['historical', 'istanbul', 'museum'],
+        )
+        POI.objects.create(
+            name='Galata Tower',
+            address='Beyoglu, Istanbul',
+            location=Point(28.9741, 41.0256),
+            category=POI.Category.HISTORICAL,
+            average_rating=4.7,
+            tags=['historical', 'istanbul'],
+        )
+        POI.objects.create(
+            name='Istanbul Cafe',
+            address='Kadikoy, Istanbul',
+            location=Point(29.0300, 40.9920),
+            category=POI.Category.FOOD,
+            average_rating=4.5,
+            tags=['food', 'istanbul', 'cafe'],
+        )
+
+        url = reverse('trips:itinerary-generate-from-preferences')
+        data = {
+            'city': 'Istanbul',
+            'duration_days': 2,
+            'interests': ['historical', 'food'],
+            'stops_per_day': 2,
+        }
+        response = self.client.post(url, data, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn('itinerary', response.data)
+        self.assertIn('day_plan', response.data)
+        self.assertEqual(response.data['summary']['city'], 'Istanbul')
+        self.assertEqual(Itinerary.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(ItineraryItem.objects.filter(itinerary__user=self.user).count(), 3)
+
+    def test_generate_from_preferences_returns_error_when_city_has_no_pois(self):
+        """Test generation returns 400 when there are no POIs in selected city."""
+        url = reverse('trips:itinerary-generate-from-preferences')
+        response = self.client.post(
+            url,
+            {
+                'city': 'NonExistingCity',
+                'duration_days': 2,
+                'interests': ['nature'],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
+
 
 class ItineraryItemAPITest(APITestCase):
     """Test cases for ItineraryItem API endpoints"""

@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+
+.idea/
+.vscode/
+
+node_modules/
+.expo/
+dist/
+web-build/
+
+__pycache__/
+*.py[cod]
+
+backend/media/

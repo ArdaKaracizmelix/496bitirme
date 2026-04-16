@@ -12,14 +12,14 @@ class InteractionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Interaction
         fields = ['id', 'user', 'poi', 'interaction_type', 'timestamp']
-        read_only_fields = ['id', 'timestamp']
+        read_only_fields = ['id', 'user', 'timestamp']
 
 
 class ReviewSerializer(serializers.ModelSerializer):
     class Meta:
         model = Review
         fields = ['id', 'user', 'poi', 'rating', 'comment', 'is_verified_purchase', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'created_at', 'updated_at']
         
     def validate_rating(self, value):
         if not (0 <= value <= 5):

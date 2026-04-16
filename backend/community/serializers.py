@@ -46,7 +46,7 @@ class PostDTO(serializers.Serializer):
 
 class SocialPostCreateSerializer(serializers.Serializer):
     """Serializer for creating a new social post."""
-    content = serializers.CharField(max_length=5000)
+    content = serializers.CharField(max_length=5000, required=False, allow_blank=True, default='')
     media_urls = serializers.ListField(
         child=serializers.URLField(),
         required=False,
@@ -62,11 +62,21 @@ class SocialPostCreateSerializer(serializers.Serializer):
         choices=['PUBLIC', 'FOLLOWERS', 'PRIVATE'],
         default='PUBLIC'
     )
+
+    def validate(self, attrs):
+        content = (attrs.get('content') or '').strip()
+        media_urls = attrs.get('media_urls', [])
+
+        if not content and not media_urls:
+            raise serializers.ValidationError(
+                'At least one of content or media_urls must be provided.'
+            )
+        return attrs
     
     def create(self, validated_data):
         """Create a new SocialPost document."""
         post = SocialPost(
-            content=validated_data['content'],
+            content=validated_data.get('content', '').strip(),
             media_urls=validated_data.get('media_urls', []),
             location=validated_data.get('location'),
             tags=validated_data.get('tags', []),

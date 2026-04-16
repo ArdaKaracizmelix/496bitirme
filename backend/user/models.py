@@ -65,6 +65,56 @@ class UserProfile(models.Model):
         return FollowRelation.objects.filter(follower=self,following =target_profile).exists()
 
 
+class Interest(models.Model):
+    class Kind(models.TextChoices):
+        GROUP = "group", "Group"
+        TYPE = "type", "Type"
+
+    key = models.CharField(max_length=120, unique=True)
+    title = models.CharField(max_length=150)
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.GROUP)
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        related_name="children",
+        blank=True,
+        null=True,
+    )
+    icon = models.CharField(max_length=40, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("sort_order", "title")
+
+    def __str__(self):
+        return self.title
+
+
+class UserInterest(models.Model):
+    profile = models.ForeignKey(
+        UserProfile,
+        on_delete=models.CASCADE,
+        related_name="selected_interests",
+    )
+    interest = models.ForeignKey(
+        Interest,
+        on_delete=models.CASCADE,
+        related_name="user_selections",
+    )
+    weight = models.FloatField(default=1.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("profile", "interest")
+
+    def __str__(self):
+        return f"{self.profile_id} -> {self.interest.key}"
+
+
 
 
 class FollowRelation(models.Model) :

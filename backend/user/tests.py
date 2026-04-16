@@ -1,9 +1,11 @@
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth import get_user_model
+from unittest.mock import patch
 from rest_framework import status
 from rest_framework.test import APITestCase
 from .models import UserProfile, FollowRelation
+from .services import generate_email_verification_token
 
 User = get_user_model()
 
@@ -141,3 +143,57 @@ class UserAPITests(APITestCase):
         
         self.profile1.refresh_from_db()
         self.assertEqual(self.profile1.following_count, 0)
+
+
+class EmailVerificationAuthTests(APITestCase):
+    @patch("user.services.EmailService.send", return_value=True)
+    @patch("user.services.EmailService.render_template", return_value="<html>ok</html>")
+    def test_register_creates_inactive_user(self, _mock_render, _mock_send):
+        response = self.client.post(
+            reverse("register"),
+            {
+                "full_name": "Test User",
+                "email": "verifyme@example.com",
+                "password": "StrongPass1",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        user = User.objects.get(email="verifyme@example.com")
+        self.assertFalse(user.is_active)
+
+    def test_login_unverified_user_is_rejected(self):
+        User.objects.create_user(
+            username="novalid@example.com",
+            email="novalid@example.com",
+            password="StrongPass1",
+            is_active=False,
+        )
+
+        response = self.client.post(
+            reverse("login"),
+            {"email": "novalid@example.com", "password": "StrongPass1"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["detail"], "Please verify your email before logging in")
+
+    def test_verify_email_activates_account(self):
+        user = User.objects.create_user(
+            username="inactive@example.com",
+            email="inactive@example.com",
+            password="StrongPass1",
+            is_active=False,
+        )
+        profile = UserProfile.objects.create(user=user, is_verified=False)
+        token = generate_email_verification_token(user)
+
+        response = self.client.get(reverse("verify_email"), {"token": token})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        profile.refresh_from_db()
+        self.assertTrue(user.is_active)
+        self.assertTrue(profile.is_verified)

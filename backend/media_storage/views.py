@@ -68,6 +68,8 @@ class MediaUploadViewSet(viewsets.ViewSet):
             # Upload to S3
             storage = self.get_storage_service()
             url = storage.upload_file(cleaned_image, path='posts/')
+            if url.startswith('/'):
+                url = request.build_absolute_uri(url)
             
             response_data = {
                 'url': url,
