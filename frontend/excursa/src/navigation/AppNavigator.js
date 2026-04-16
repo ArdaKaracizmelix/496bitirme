@@ -205,6 +205,7 @@ function MainTabs() {
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarShowLabel: true,
+        tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: '#1a1a2e',
         tabBarInactiveTintColor: '#8f887d',
         tabBarLabelStyle: {

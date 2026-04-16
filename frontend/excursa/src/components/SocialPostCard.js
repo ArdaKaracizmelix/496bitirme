@@ -86,9 +86,6 @@ export default function SocialPostCard({
             <Text style={styles.actionIcon}>↗</Text>
           </TouchableOpacity>
         </View>
-        <TouchableOpacity style={styles.saveButton}>
-          <Text style={styles.actionIcon}>□</Text>
-        </TouchableOpacity>
       </View>
 
       <View style={styles.body}>
@@ -252,12 +249,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 4,
-  },
-  saveButton: {
-    width: 38,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   actionIcon: {
     color: '#1a1a2e',

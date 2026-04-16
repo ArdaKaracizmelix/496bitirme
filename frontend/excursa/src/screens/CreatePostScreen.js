@@ -68,7 +68,7 @@ function Header({ canSubmit, submitting, onBack, onSubmit }) {
         <Text style={styles.headerSubtitle}>Anini toplulukla paylas</Text>
       </View>
       <TouchableOpacity
-        style={[styles.headerShare, (!canSubmit || submitting) && styles.disabled]}
+        style={[styles.headerShare, (!canSubmit || submitting) && styles.headerShareDisabled]}
         onPress={onSubmit}
         disabled={!canSubmit || submitting}
       >
@@ -251,6 +251,7 @@ function VisibilityCard({ value, onSelect }) {
 }
 
 function BottomBar({ bottom, canSubmit, submitting, error, onSubmit }) {
+  const isDisabled = !canSubmit || submitting;
   return (
     <View style={[styles.bottomBar, { paddingBottom: Math.max(bottom, 12) }]}>
       <View style={styles.bottomCopy}>
@@ -258,11 +259,17 @@ function BottomBar({ bottom, canSubmit, submitting, error, onSubmit }) {
         <Text style={styles.bottomText} numberOfLines={1}>{error || 'Topluluga temiz ve akici bir gonderi olarak gidecek.'}</Text>
       </View>
       <TouchableOpacity
-        style={[styles.primaryCta, (!canSubmit || submitting) && styles.disabled]}
+        style={[styles.primaryCta, isDisabled && styles.primaryCtaDisabled]}
         onPress={onSubmit}
-        disabled={!canSubmit || submitting}
+        disabled={isDisabled}
       >
-        {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primaryCtaText}>Paylas</Text>}
+        {submitting ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Text style={[styles.primaryCtaText, isDisabled && styles.primaryCtaTextDisabled]}>
+            Paylas
+          </Text>
+        )}
       </TouchableOpacity>
     </View>
   );
@@ -531,7 +538,7 @@ export default function CreatePostScreen({ route }) {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <KeyboardAvoidingView style={styles.keyboardRoot} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={8}>
+      <KeyboardAvoidingView style={styles.keyboardRoot} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={8}>
         <Header canSubmit={canSubmit} submitting={submitting} onBack={() => navigation.goBack()} onSubmit={handleSubmitPost} />
         <ScrollView
           style={styles.scroll}
@@ -720,8 +727,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
   },
+  headerShareDisabled: {
+    backgroundColor: '#9da3b0',
+  },
   headerShareText: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  disabled: { opacity: 0.45 },
+  disabled: { opacity: 0.58 },
   scroll: { flex: 1 },
   scrollContent: { padding: 16, alignItems: 'center' },
   contentShell: { width: '100%', maxWidth: 760 },
@@ -903,7 +913,7 @@ const styles = StyleSheet.create({
   },
   bottomCopy: { flex: 1, minWidth: 0 },
   bottomTitle: { color: C.ink, fontSize: 14, fontWeight: '900' },
-  bottomText: { color: C.muted, fontSize: 12, marginTop: 3 },
+  bottomText: { color: '#5c6371', fontSize: 12, marginTop: 3 },
   primaryCta: {
     minWidth: 116,
     minHeight: 50,
@@ -913,7 +923,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 18,
   },
+  primaryCtaDisabled: {
+    backgroundColor: '#9da3b0',
+  },
   primaryCtaText: { color: '#fff', fontSize: 15, fontWeight: '900' },
+  primaryCtaTextDisabled: { color: '#f5f7ff' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(10, 12, 18, 0.46)', justifyContent: 'flex-end' },
   sheet: {
     width: '100%',

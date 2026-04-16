@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapViewport from './MapViewport';
 import { useMapController } from '../../hooks/useMapController';
 import { getCategoryColor, getCategoryName, formatDistance, calculateDistance } from '../../utils/mapUtils';
@@ -132,6 +133,7 @@ const buildWebMapHtml = (markers, region) => {
 };
 
 export default function MapScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
   const locationInitializedRef = useRef(false);
   const markersRef = useRef([]);
@@ -314,12 +316,12 @@ export default function MapScreen({ navigation }) {
       )}
 
       {error && (
-        <View style={styles.errorBanner}>
+        <View style={[styles.errorBanner, { top: insets.top }]}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
       )}
 
-      <View style={styles.searchContainer}>
+      <View style={[styles.searchContainer, { top: insets.top + 12 }]}>
         <View style={styles.searchBar}>
           <TextInput
             style={styles.searchInput}

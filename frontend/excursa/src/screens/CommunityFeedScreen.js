@@ -7,7 +7,6 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   Share,
   StyleSheet,
   Text,
@@ -16,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import SocialPostCard from '../components/SocialPostCard';
 import { useDeletePost, useFeed, useToggleLike } from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
@@ -31,6 +31,7 @@ const QUICK_ITEMS = [
 export default function CommunityFeedScreen() {
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const currentUserId = user?.id || user?.profile_id || user?.profile?.id;
   const {
@@ -57,6 +58,9 @@ export default function CommunityFeedScreen() {
     () => data?.pages?.flatMap((page) => page.results) || [],
     [data]
   );
+  const isCompact = width < 380;
+  const fabBottom = (Platform.OS === 'ios' ? 86 : 74) + insets.bottom;
+  const feedBottomPadding = fabBottom + 74;
 
   const contentMaxWidth = width >= 900 ? 720 : 640;
 
@@ -205,18 +209,11 @@ export default function CommunityFeedScreen() {
 
   const renderHeader = () => (
     <View style={[styles.headerWrap, { maxWidth: contentMaxWidth }]}>
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
         <View>
           <Text style={styles.brand}>EXCURSA</Text>
-          <Text style={styles.title}>Akis</Text>
+          <Text style={[styles.title, isCompact && styles.titleCompact]}>Akis</Text>
         </View>
-        <TouchableOpacity
-          style={styles.createIconButton}
-          onPress={() => setShowCreateOptions(true)}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.createIconText}>+</Text>
-        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -243,7 +240,7 @@ export default function CommunityFeedScreen() {
   );
 
   const renderState = (title, subtitle, actionLabel, action) => (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.stateContainer}>
         <Text style={styles.stateTitle}>{title}</Text>
         <Text style={styles.stateSubtitle}>{subtitle}</Text>
@@ -258,7 +255,7 @@ export default function CommunityFeedScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.stateContainer}>
           <ActivityIndicator size="large" color="#1a1a2e" />
           <Text style={styles.stateTitle}>Akis hazirlaniyor</Text>
@@ -279,7 +276,7 @@ export default function CommunityFeedScreen() {
 
   if (posts.length === 0) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={[styles.emptyHeaderWrap, { maxWidth: contentMaxWidth }]}>
           {renderHeader()}
           <View style={styles.emptyCard}>
@@ -300,7 +297,7 @@ export default function CommunityFeedScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
         data={posts}
         keyExtractor={(item) => item.id?.toString()}
@@ -318,7 +315,7 @@ export default function CommunityFeedScreen() {
         ListHeaderComponent={renderHeader}
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.45}
-        contentContainerStyle={styles.feedContent}
+        contentContainerStyle={[styles.feedContent, { paddingBottom: feedBottomPadding }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -338,7 +335,7 @@ export default function CommunityFeedScreen() {
       />
 
       <TouchableOpacity
-        style={styles.fab}
+        style={[styles.fab, { bottom: fabBottom }]}
         onPress={() => setShowCreateOptions(true)}
         activeOpacity={0.9}
       >
@@ -458,8 +455,8 @@ const styles = StyleSheet.create({
   },
   feedContent: {
     paddingHorizontal: 14,
-    paddingTop: 8,
-    paddingBottom: Platform.OS === 'ios' ? 118 : 100,
+    paddingTop: 10,
+    paddingBottom: 100,
   },
   headerWrap: {
     width: '100%',
@@ -469,9 +466,12 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     marginBottom: 16,
     paddingHorizontal: 2,
+  },
+  topBarCompact: {
+    marginBottom: 12,
   },
   brand: {
     color: '#9b8356',
@@ -485,24 +485,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginTop: 1,
   },
-  createIconButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1a1a2e',
-    shadowColor: '#1a1a2e',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  createIconText: {
-    color: '#fff',
+  titleCompact: {
     fontSize: 28,
-    fontWeight: '600',
-    lineHeight: 31,
   },
   quickRail: {
     paddingRight: 18,
@@ -575,7 +559,7 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
     paddingHorizontal: 14,
-    paddingTop: 8,
+    paddingTop: 10,
   },
   emptyCard: {
     marginTop: 20,
@@ -608,7 +592,6 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 20,
-    bottom: Platform.OS === 'ios' ? 104 : 88,
     width: 56,
     height: 56,
     borderRadius: 28,

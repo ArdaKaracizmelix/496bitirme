@@ -24,6 +24,8 @@ export default function InterestSelectionScreen({ route, navigation }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const { width } = useWindowDimensions();
+  const isCompact = width < 380;
+  const isNarrow = width < 340;
   const completeOnboarding = useAuthStore((state) => state.completeOnboarding);
   const updateUser = useAuthStore((state) => state.updateUser);
   const isEditMode = route?.params?.mode === 'edit';
@@ -155,25 +157,27 @@ export default function InterestSelectionScreen({ route, navigation }) {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, isCompact && styles.scrollContentCompact]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.hero}>
+        <View style={[styles.hero, isCompact && styles.heroCompact]}>
           <View style={styles.heroBadge}>
             <Text style={styles.heroBadgeText}>ONBOARDING</Text>
           </View>
-          <Text style={styles.title}>Seyahat tarzini sec</Text>
-          <Text style={styles.subtitle}>
+          <Text style={[styles.title, isCompact && styles.titleCompact]}>Seyahat tarzini sec</Text>
+          <Text style={[styles.subtitle, isCompact && styles.subtitleCompact]}>
             Sana daha iyi rota, mekan ve sosyal akis onermek icin ilgilerini belirleyelim.
           </Text>
-          <Text style={styles.helperText}>Bunlari daha sonra profilinden degistirebilirsin.</Text>
+          <Text style={[styles.helperText, isCompact && styles.helperTextCompact]}>
+            Bunlari daha sonra profilinden degistirebilirsin.
+          </Text>
         </View>
 
-        <View style={styles.counterRow}>
-          <Text style={styles.counterText}>
+        <View style={[styles.counterRow, isNarrow && styles.counterRowCompact]}>
+          <Text style={[styles.counterText, isCompact && styles.counterTextCompact]}>
             {selectedTagIds.size}/{MAX_SELECTIONS} secildi
           </Text>
-          <Text style={styles.counterHint}>
+          <Text style={[styles.counterHint, isNarrow && styles.counterHintCompact]}>
             En az 1 ilgi alani sec
           </Text>
         </View>
@@ -195,7 +199,7 @@ export default function InterestSelectionScreen({ route, navigation }) {
         {!isLoading && availableTags.length === 0 ? renderEmptyState() : null}
 
         {!isLoading && availableTags.length > 0 ? (
-          <View style={styles.grid}>
+          <View style={[styles.grid, isCompact && styles.gridCompact]}>
             {availableTags.map((tag) => {
               const selected = selectedTagIds.has(tag.id);
               const disabled = isSubmitting || (!selected && selectedTagIds.size >= MAX_SELECTIONS);
@@ -250,12 +254,22 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
+  scrollContentCompact: {
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 118,
+  },
   hero: {
     backgroundColor: '#1a1a2e',
     borderRadius: 30,
     padding: 24,
     marginBottom: 18,
     overflow: 'hidden',
+  },
+  heroCompact: {
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 14,
   },
   heroBadge: {
     alignSelf: 'flex-start',
@@ -277,17 +291,29 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginBottom: 10,
   },
+  titleCompact: {
+    fontSize: 25,
+    marginBottom: 8,
+  },
   subtitle: {
     color: '#dedbea',
     fontSize: 15,
     lineHeight: 22,
     maxWidth: 620,
   },
+  subtitleCompact: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
   helperText: {
     color: '#d7c49e',
     fontSize: 13,
     fontWeight: '700',
     marginTop: 16,
+  },
+  helperTextCompact: {
+    fontSize: 12,
+    marginTop: 12,
   },
   counterRow: {
     flexDirection: 'row',
@@ -296,15 +322,26 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 14,
   },
+  counterRowCompact: {
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    gap: 6,
+  },
   counterText: {
     color: '#1a1a2e',
     fontSize: 16,
     fontWeight: '900',
   },
+  counterTextCompact: {
+    fontSize: 15,
+  },
   counterHint: {
     color: '#786f61',
     fontSize: 13,
     fontWeight: '700',
+  },
+  counterHintCompact: {
+    width: '100%',
   },
   errorContainer: {
     backgroundColor: '#ffe6e6',
@@ -336,6 +373,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
+  },
+  gridCompact: {
+    gap: 10,
   },
   cardWrap: {
     flexGrow: 1,

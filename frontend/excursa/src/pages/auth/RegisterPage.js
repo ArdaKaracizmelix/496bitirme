@@ -64,6 +64,8 @@ export default function RegisterPage({ navigation }) {
   const { width } = useWindowDimensions();
 
   const cardWidth = useMemo(() => Math.min(width - 32, 480), [width]);
+  const isCompact = width < 380;
+  const isNarrow = width < 340;
   const isSuccess = !!registeredEmail;
 
   const validateForm = () => {
@@ -166,22 +168,22 @@ export default function RegisterPage({ navigation }) {
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         style={styles.keyboardRoot}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, isCompact && styles.scrollContentCompact]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={[styles.card, { width: cardWidth }]}>
-            <View style={styles.topPill}>
-              <Text style={styles.topPillText}>Yeni yolculuk</Text>
+          <View style={[styles.card, isCompact && styles.cardCompact, isNarrow && styles.cardNarrow, { width: cardWidth }]}>
+            <View style={[styles.topPill, isCompact && styles.topPillCompact]}>
+              <Text style={[styles.topPillText, isCompact && styles.topPillTextCompact]}>Yeni yolculuk</Text>
             </View>
-            <Text style={styles.brand}>EXCURSA</Text>
-            <Text style={styles.title}>
+            <Text style={[styles.brand, isCompact && styles.brandCompact]}>EXCURSA</Text>
+            <Text style={[styles.title, isCompact && styles.titleCompact]}>
               {isSuccess ? 'Mailini kontrol et' : 'Hesap olustur'}
             </Text>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.subtitle, isCompact && styles.subtitleCompact]}>
               {isSuccess
                 ? 'Kaydini aldik. Guvenlik icin giris yapmadan once e-posta dogrulamani tamamlamalisin.'
                 : 'Seyahat akisina katil, rotalarini kaydet ve gezginlerle paylas.'}
@@ -189,11 +191,11 @@ export default function RegisterPage({ navigation }) {
 
             {isSuccess ? (
               <View style={styles.successPanel}>
-                <View style={styles.mailIcon}>
-                  <Text style={styles.mailIconText}>@</Text>
+                <View style={[styles.mailIcon, isCompact && styles.mailIconCompact]}>
+                  <Text style={[styles.mailIconText, isCompact && styles.mailIconTextCompact]}>@</Text>
                 </View>
-                <Text style={styles.successTitle}>Dogrulama e-postasi gonderildi</Text>
-                <Text style={styles.successText}>
+                <Text style={[styles.successTitle, isCompact && styles.successTitleCompact]}>Dogrulama e-postasi gonderildi</Text>
+                <Text style={[styles.successText, isCompact && styles.successTextCompact]}>
                   {registeredEmail} adresine gelen dogrulama baglantisini onayla.
                   Onaydan sonra login ekranindan giris yapabilirsin.
                 </Text>
@@ -234,6 +236,7 @@ export default function RegisterPage({ navigation }) {
                   value={password}
                   placeholder="En az 8 karakter"
                   error={validationErrors.password}
+                  isNarrow={isNarrow}
                   editable={!isLoading}
                   visible={isPasswordVisible}
                   onToggleVisible={() => setIsPasswordVisible((value) => !value)}
@@ -245,6 +248,7 @@ export default function RegisterPage({ navigation }) {
                   value={confirmPassword}
                   placeholder="Sifreni tekrar gir"
                   error={validationErrors.confirmPassword}
+                  isNarrow={isNarrow}
                   editable={!isLoading}
                   visible={isConfirmVisible}
                   onToggleVisible={() => setIsConfirmVisible((value) => !value)}
@@ -272,8 +276,8 @@ export default function RegisterPage({ navigation }) {
               </>
             )}
 
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>Zaten hesabin var mi?</Text>
+            <View style={[styles.footer, isNarrow && styles.footerCompact]}>
+              <Text style={[styles.footerText, isNarrow && styles.footerTextCompact]}>Zaten hesabin var mi?</Text>
               <TouchableOpacity onPress={() => navigation.navigate('Login')} disabled={isLoading}>
                 <Text style={styles.footerLink}>Giris yap</Text>
               </TouchableOpacity>
@@ -299,23 +303,25 @@ function AuthField({ label, error, ...inputProps }) {
   );
 }
 
-function PasswordField({ label, error, visible, onToggleVisible, ...inputProps }) {
+function PasswordField({ label, error, visible, onToggleVisible, isNarrow, ...inputProps }) {
   return (
     <View style={styles.fieldGroup}>
       <Text style={styles.label}>{label}</Text>
       <View style={[styles.passwordShell, error && styles.inputError]}>
         <TextInput
-          style={styles.passwordInput}
+          style={[styles.passwordInput, isNarrow && styles.passwordInputNarrow]}
           secureTextEntry={!visible}
           placeholderTextColor="#9a9184"
           {...inputProps}
         />
         <TouchableOpacity
-          style={styles.visibilityButton}
+          style={[styles.visibilityButton, isNarrow && styles.visibilityButtonNarrow]}
           onPress={onToggleVisible}
           disabled={!inputProps.value || !inputProps.editable}
         >
-          <Text style={styles.visibilityText}>{visible ? 'Gizle' : 'Goster'}</Text>
+          <Text style={[styles.visibilityText, isNarrow && styles.visibilityTextNarrow]}>
+            {visible ? 'Gizle' : 'Goster'}
+          </Text>
         </TouchableOpacity>
       </View>
       {error ? <Text style={styles.fieldError}>{error}</Text> : null}
@@ -338,6 +344,10 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingVertical: 28,
   },
+  scrollContentCompact: {
+    justifyContent: 'flex-start',
+    paddingVertical: 18,
+  },
   card: {
     borderRadius: 32,
     padding: 24,
@@ -350,6 +360,13 @@ const styles = StyleSheet.create({
     shadowRadius: 28,
     elevation: 5,
   },
+  cardCompact: {
+    borderRadius: 26,
+    padding: 20,
+  },
+  cardNarrow: {
+    padding: 16,
+  },
   topPill: {
     alignSelf: 'flex-start',
     borderRadius: 999,
@@ -358,10 +375,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a2e',
     marginBottom: 18,
   },
+  topPillCompact: {
+    marginBottom: 14,
+  },
   topPillText: {
     color: '#d7c49e',
     fontSize: 12,
     fontWeight: '900',
+  },
+  topPillTextCompact: {
+    fontSize: 11,
   },
   brand: {
     color: '#9b8356',
@@ -370,11 +393,19 @@ const styles = StyleSheet.create({
     letterSpacing: 1.8,
     marginBottom: 6,
   },
+  brandCompact: {
+    fontSize: 11,
+    letterSpacing: 1.5,
+  },
   title: {
     color: '#1a1a2e',
     fontSize: 30,
     fontWeight: '900',
     letterSpacing: -0.6,
+  },
+  titleCompact: {
+    fontSize: 25,
+    letterSpacing: -0.3,
   },
   subtitle: {
     color: '#746b5e',
@@ -382,6 +413,11 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginTop: 8,
     marginBottom: 20,
+  },
+  subtitleCompact: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 16,
   },
   errorBox: {
     borderRadius: 18,
@@ -441,14 +477,24 @@ const styles = StyleSheet.create({
     color: '#1a1a2e',
     fontSize: 15,
   },
+  passwordInputNarrow: {
+    paddingHorizontal: 12,
+  },
   visibilityButton: {
     paddingHorizontal: 14,
     paddingVertical: 12,
+    justifyContent: 'center',
+  },
+  visibilityButtonNarrow: {
+    paddingHorizontal: 10,
   },
   visibilityText: {
     color: '#9b8356',
     fontSize: 12,
     fontWeight: '900',
+  },
+  visibilityTextNarrow: {
+    fontSize: 11,
   },
   hintBox: {
     borderRadius: 18,
@@ -502,16 +548,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f7a43',
     marginBottom: 14,
   },
+  mailIconCompact: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    marginBottom: 10,
+  },
   mailIconText: {
     color: '#fff',
     fontSize: 22,
     fontWeight: '900',
+  },
+  mailIconTextCompact: {
+    fontSize: 19,
   },
   successTitle: {
     color: '#1f7a43',
     fontSize: 17,
     fontWeight: '900',
     marginBottom: 7,
+  },
+  successTitleCompact: {
+    fontSize: 15,
+    marginBottom: 6,
   },
   successText: {
     color: '#2f6844',
@@ -520,6 +579,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 16,
   },
+  successTextCompact: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -527,10 +590,18 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 22,
   },
+  footerCompact: {
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 18,
+  },
   footerText: {
     color: '#81786b',
     fontSize: 13,
     fontWeight: '700',
+  },
+  footerTextCompact: {
+    textAlign: 'center',
   },
   footerLink: {
     color: '#1a1a2e',

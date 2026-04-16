@@ -45,6 +45,8 @@ export default function LoginPage({ navigation, route }) {
   const { width } = useWindowDimensions();
 
   const cardWidth = useMemo(() => Math.min(width - 32, 460), [width]);
+  const isCompact = width < 380;
+  const isNarrow = width < 340;
 
   useEffect(() => {
     if (route?.params?.email) setEmail(route.params.email);
@@ -86,20 +88,20 @@ export default function LoginPage({ navigation, route }) {
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         style={styles.keyboardRoot}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, isCompact && styles.scrollContentCompact]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={[styles.card, { width: cardWidth }]}>
-            <View style={styles.brandMark}>
-              <Text style={styles.brandMarkText}>E</Text>
+          <View style={[styles.card, isCompact && styles.cardCompact, isNarrow && styles.cardNarrow, { width: cardWidth }]}>
+            <View style={[styles.brandMark, isCompact && styles.brandMarkCompact]}>
+              <Text style={[styles.brandMarkText, isCompact && styles.brandMarkTextCompact]}>E</Text>
             </View>
-            <Text style={styles.brand}>EXCURSA</Text>
-            <Text style={styles.title}>Tekrar hos geldin</Text>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.brand, isCompact && styles.brandCompact]}>EXCURSA</Text>
+            <Text style={[styles.title, isCompact && styles.titleCompact]}>Tekrar hos geldin</Text>
+            <Text style={[styles.subtitle, isCompact && styles.subtitleCompact]}>
               Rotalarina, kayitli gezilerine ve seyahat akisina kaldigin yerden devam et.
             </Text>
 
@@ -135,9 +137,9 @@ export default function LoginPage({ navigation, route }) {
 
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>Sifre</Text>
-              <View style={styles.passwordShell}>
+              <View style={[styles.passwordShell, isNarrow && styles.passwordShellNarrow]}>
                 <TextInput
-                  style={styles.passwordInput}
+                  style={[styles.passwordInput, isNarrow && styles.passwordInputNarrow]}
                   value={password}
                   onChangeText={(text) => {
                     setPassword(text);
@@ -148,11 +150,11 @@ export default function LoginPage({ navigation, route }) {
                   editable={!isLoading}
                 />
                 <TouchableOpacity
-                  style={styles.visibilityButton}
+                  style={[styles.visibilityButton, isNarrow && styles.visibilityButtonNarrow]}
                   onPress={() => setIsPasswordVisible((value) => !value)}
                   disabled={!password || isLoading}
                 >
-                  <Text style={styles.visibilityText}>
+                  <Text style={[styles.visibilityText, isNarrow && styles.visibilityTextNarrow]}>
                     {isPasswordVisible ? 'Gizle' : 'Goster'}
                   </Text>
                 </TouchableOpacity>
@@ -172,8 +174,8 @@ export default function LoginPage({ navigation, route }) {
               )}
             </TouchableOpacity>
 
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>Hesabin yok mu?</Text>
+            <View style={[styles.footer, isNarrow && styles.footerCompact]}>
+              <Text style={[styles.footerText, isNarrow && styles.footerTextCompact]}>Hesabin yok mu?</Text>
               <TouchableOpacity onPress={() => navigation.navigate('Register')} disabled={isLoading}>
                 <Text style={styles.footerLink}>Kayit ol</Text>
               </TouchableOpacity>
@@ -200,6 +202,10 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingVertical: 28,
   },
+  scrollContentCompact: {
+    justifyContent: 'flex-start',
+    paddingVertical: 18,
+  },
   card: {
     borderRadius: 32,
     padding: 24,
@@ -212,6 +218,13 @@ const styles = StyleSheet.create({
     shadowRadius: 28,
     elevation: 5,
   },
+  cardCompact: {
+    borderRadius: 26,
+    padding: 20,
+  },
+  cardNarrow: {
+    padding: 16,
+  },
   brandMark: {
     width: 54,
     height: 54,
@@ -221,10 +234,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a2e',
     marginBottom: 18,
   },
+  brandMarkCompact: {
+    width: 48,
+    height: 48,
+    borderRadius: 17,
+    marginBottom: 14,
+  },
   brandMarkText: {
     color: '#d7c49e',
     fontSize: 22,
     fontWeight: '900',
+  },
+  brandMarkTextCompact: {
+    fontSize: 20,
   },
   brand: {
     color: '#9b8356',
@@ -233,11 +255,19 @@ const styles = StyleSheet.create({
     letterSpacing: 1.8,
     marginBottom: 6,
   },
+  brandCompact: {
+    fontSize: 11,
+    letterSpacing: 1.5,
+  },
   title: {
     color: '#1a1a2e',
     fontSize: 30,
     fontWeight: '900',
     letterSpacing: -0.6,
+  },
+  titleCompact: {
+    fontSize: 25,
+    letterSpacing: -0.3,
   },
   subtitle: {
     color: '#746b5e',
@@ -245,6 +275,11 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginTop: 8,
     marginBottom: 22,
+  },
+  subtitleCompact: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 18,
   },
   infoBox: {
     borderRadius: 18,
@@ -311,6 +346,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: '#f7f3ea',
   },
+  passwordShellNarrow: {
+    alignItems: 'stretch',
+  },
   passwordInput: {
     flex: 1,
     paddingHorizontal: 15,
@@ -318,14 +356,24 @@ const styles = StyleSheet.create({
     color: '#1a1a2e',
     fontSize: 15,
   },
+  passwordInputNarrow: {
+    paddingHorizontal: 12,
+  },
   visibilityButton: {
     paddingHorizontal: 14,
     paddingVertical: 12,
+    justifyContent: 'center',
+  },
+  visibilityButtonNarrow: {
+    paddingHorizontal: 10,
   },
   visibilityText: {
     color: '#9b8356',
     fontSize: 12,
     fontWeight: '900',
+  },
+  visibilityTextNarrow: {
+    fontSize: 11,
   },
   primaryButton: {
     height: 54,
@@ -355,10 +403,18 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 22,
   },
+  footerCompact: {
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 18,
+  },
   footerText: {
     color: '#81786b',
     fontSize: 13,
     fontWeight: '700',
+  },
+  footerTextCompact: {
+    textAlign: 'center',
   },
   footerLink: {
     color: '#1a1a2e',

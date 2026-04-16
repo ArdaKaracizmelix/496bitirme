@@ -9,10 +9,11 @@ import {
   ActivityIndicator,
   Alert,
   ScrollView,
-  Dimensions,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useFollowUser,
   useUnfollowUser,
@@ -21,11 +22,10 @@ import {
 } from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
 
-const screenWidth = Dimensions.get('window').width;
-const itemWidth = (screenWidth - 27) / 3;
-
 export default function ProfileScreen({ route }) {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const { user: currentUser } = useAuthStore();
   const logout = useAuthStore((state) => state.logout);
   const routeParams = route?.params || {};
@@ -52,6 +52,8 @@ export default function ProfileScreen({ route }) {
   const followMutation = useFollowUser();
   const unfollowMutation = useUnfollowUser();
   const [activeTab, setActiveTab] = useState('grid');
+  const isCompact = width < 390;
+  const gridItemSize = Math.floor((width - 26) / 3);
 
   const posts = postsData?.results || [];
   const postsCount = postsData?.count ?? posts.length;
@@ -149,9 +151,12 @@ export default function ProfileScreen({ route }) {
   };
 
   const renderHeader = () => (
-    <View style={styles.headerContainer}>
-      <View style={styles.topSection}>
-        <Image source={{ uri: userProfile.avatar_url }} style={styles.profileAvatar} />
+    <View style={[styles.headerContainer, insets.top > 0 && styles.headerInset]}>
+      <View style={[styles.topSection, isCompact && styles.topSectionCompact]}>
+        <Image
+          source={{ uri: userProfile.avatar_url }}
+          style={[styles.profileAvatar, isCompact && styles.profileAvatarCompact]}
+        />
         <View style={styles.statsContainer}>
           <View style={styles.stat}>
             <Text style={styles.statNumber}>{postsCount}</Text>
@@ -201,10 +206,10 @@ export default function ProfileScreen({ route }) {
               <Text style={styles.actionButtonText}>Profili Duzenle</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.actionButton, styles.secondaryButton]}
+              style={[styles.actionButton, styles.secondaryButton, isCompact && styles.secondaryButtonCompact]}
               onPress={() => Alert.alert('Ayarlar', 'Ayarlar sayfasi yakinda gelecek.')}
             >
-              <Text style={styles.secondaryButtonText}>A</Text>
+              <Text style={styles.secondaryButtonText}>Ayarlar</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -265,7 +270,7 @@ export default function ProfileScreen({ route }) {
 
   const renderPostItem = ({ item }) => (
     <TouchableOpacity
-      style={styles.gridItem}
+      style={[styles.gridItem, { width: gridItemSize, height: gridItemSize }]}
       onPress={() =>
         navigation.navigate('Social', {
           screen: 'PostDetail',
@@ -300,18 +305,18 @@ export default function ProfileScreen({ route }) {
 
   if (isLoading) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         {renderHeader()}
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1a1a2e" />
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (isError) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         {renderHeader()}
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>Veriler yuklenemedi</Text>
@@ -325,12 +330,12 @@ export default function ProfileScreen({ route }) {
             <Text style={styles.retryButtonText}>Tekrar Dene</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {activeTab === 'grid' ? (
         <FlatList
           data={posts}
@@ -360,7 +365,7 @@ export default function ProfileScreen({ route }) {
           {renderMapView()}
         </ScrollView>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -371,21 +376,33 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     paddingHorizontal: 12,
-    paddingTop: 12,
+    paddingTop: 8,
     paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+  },
+  headerInset: {
+    paddingTop: 12,
   },
   topSection: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginBottom: 16,
   },
+  topSectionCompact: {
+    marginBottom: 12,
+  },
   profileAvatar: {
     width: 80,
     height: 80,
     borderRadius: 40,
     marginRight: 16,
+  },
+  profileAvatarCompact: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    marginRight: 12,
   },
   statsContainer: {
     flex: 1,
@@ -472,11 +489,14 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     flex: 0,
-    width: '20%',
+    minWidth: 88,
     backgroundColor: '#f5f5f5',
   },
+  secondaryButtonCompact: {
+    minWidth: 74,
+  },
   secondaryButtonText: {
-    fontSize: 16,
+    fontSize: 13,
     color: '#1a1a2e',
     fontWeight: '700',
   },
@@ -495,7 +515,8 @@ const styles = StyleSheet.create({
   },
   messageButton: {
     flex: 0,
-    width: '24%',
+    minWidth: 92,
+    maxWidth: 132,
     backgroundColor: '#f5f5f5',
     borderWidth: 1,
     borderColor: '#d9d9d9',
@@ -548,8 +569,6 @@ const styles = StyleSheet.create({
     marginBottom: 1,
   },
   gridItem: {
-    width: itemWidth,
-    height: itemWidth,
     marginBottom: 1,
     borderRadius: 4,
     overflow: 'hidden',

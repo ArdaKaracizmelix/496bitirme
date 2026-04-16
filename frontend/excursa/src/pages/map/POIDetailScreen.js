@@ -13,6 +13,7 @@ import {
   Alert,
   Image,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import locationService from '../../services/locationService';
 import { getCategoryColor, getCategoryName } from '../../utils/mapUtils';
 
@@ -22,6 +23,7 @@ import { getCategoryColor, getCategoryName } from '../../utils/mapUtils';
  */
 export default function POIDetailScreen({ route, navigation }) {
   const { poiId } = route.params;
+  const insets = useSafeAreaInsets();
 
   // State
   const [details, setDetails] = useState(null);
@@ -179,17 +181,17 @@ export default function POIDetailScreen({ route, navigation }) {
 
   if (loading) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3498db" />
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (error || !details) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error || 'Yer bilgisi bulunamadı'}</Text>
           <TouchableOpacity
@@ -199,14 +201,14 @@ export default function POIDetailScreen({ route, navigation }) {
             <Text style={styles.retryButtonText}>Tekrar Dene</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, insets.top > 0 && styles.headerInset]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Text style={styles.backButton}>← Geri</Text>
         </TouchableOpacity>
@@ -476,7 +478,7 @@ export default function POIDetailScreen({ route, navigation }) {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -492,9 +494,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: '#fff',
-    paddingTop: Platform.OS === 'ios' ? 12 : 8,
+    paddingTop: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#ecf0f1',
+  },
+  headerInset: {
+    paddingTop: 12,
   },
   backButton: {
     fontSize: 16,

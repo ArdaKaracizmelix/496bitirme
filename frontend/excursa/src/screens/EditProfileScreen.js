@@ -15,12 +15,14 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import useAuthStore from '../store/authStore';
 import AuthManager from '../services/AuthManager';
 import api from '../services/api';
 
 export default function EditProfileScreen() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const updateUser = useAuthStore((state) => state.updateUser);
@@ -163,15 +165,22 @@ export default function EditProfileScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.contentContainer}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
+        <ScrollView
+          contentContainerStyle={[
+            styles.contentContainer,
+            {
+              paddingTop: 20 + (insets.top > 0 ? 0 : 8),
+              paddingBottom: 36 + Math.max(insets.bottom - 4, 0),
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         <Text style={styles.title}>Profili Düzenle</Text>
 
         {errorMessage ? (
@@ -297,8 +306,9 @@ export default function EditProfileScreen() {
             {isSaving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Kaydet</Text>}
           </TouchableOpacity>
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 

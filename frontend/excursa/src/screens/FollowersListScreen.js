@@ -7,17 +7,22 @@ import {
   FlatList,
   Image,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFollowList } from '../hooks/useSocial';
 
 export default function FollowersListScreen({ route }) {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const routeParams = route?.params || {};
   const userId = routeParams.userId;
   const profileName = routeParams.full_name || routeParams.user_name || 'Kullanici';
   const initialTab = routeParams.initialTab === 'following' ? 'following' : 'followers';
   const [activeTab, setActiveTab] = useState(initialTab);
+  const isCompact = width < 380;
 
   const { data, isLoading, isError, refetch } = useFollowList(userId, activeTab);
 
@@ -53,8 +58,8 @@ export default function FollowersListScreen({ route }) {
   );
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={[styles.header, insets.top > 0 && styles.headerInset, isCompact && styles.headerCompact]}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Text style={styles.backText}>Geri</Text>
         </TouchableOpacity>
@@ -102,7 +107,7 @@ export default function FollowersListScreen({ route }) {
           ListEmptyComponent={<Text style={styles.emptyText}>Henuz kimse yok.</Text>}
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -115,10 +120,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingTop: 14,
+    paddingTop: 10,
     paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+  },
+  headerInset: {
+    paddingTop: 14,
+  },
+  headerCompact: {
+    paddingHorizontal: 10,
   },
   backButton: {
     paddingVertical: 6,

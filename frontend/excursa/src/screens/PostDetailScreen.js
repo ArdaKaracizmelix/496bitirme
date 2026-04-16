@@ -8,7 +8,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   Share,
   StyleSheet,
   Text,
@@ -18,6 +17,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatTimeAgo } from '../components/SocialPostCard';
 import RouteShareCard from '../components/RouteShareCard';
 import { useAddComment, usePost, usePostComments, useToggleLike } from '../hooks/useSocial';
@@ -30,6 +30,7 @@ export default function PostDetailScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const postId = route?.params?.postId;
 
   const { data: post, isLoading, isError, refetch } = usePost(postId);
@@ -51,6 +52,7 @@ export default function PostDetailScreen() {
   );
 
   const contentMaxWidth = width >= 900 ? 760 : 640;
+  const isCompact = width < 380;
   const mediaUrls = Array.isArray(post?.media_urls) ? post.media_urls.filter(Boolean) : [];
   const hasMedia = mediaUrls.length > 0;
   const { cleanedContent: content, routeData } = getPostPresentation(post);
@@ -226,7 +228,7 @@ export default function PostDetailScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#1a1a2e" />
           <Text style={styles.stateText}>Gonderi yukleniyor...</Text>
@@ -237,7 +239,7 @@ export default function PostDetailScreen() {
 
   if (isError || !post) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.centerContainer}>
           <Text style={styles.errorText}>Gonderi yuklenemedi.</Text>
           <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
@@ -249,12 +251,12 @@ export default function PostDetailScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <KeyboardAvoidingView
         style={styles.keyboardRoot}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.header}>
+        <View style={[styles.header, isCompact && styles.headerCompact]}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
             <Text style={styles.backText}>Geri</Text>
           </TouchableOpacity>
@@ -293,7 +295,7 @@ export default function PostDetailScreen() {
           }
         />
 
-        <View style={styles.commentInputRow}>
+        <View style={[styles.commentInputRow, { paddingBottom: 12 + Math.max(insets.bottom - 4, 0) }]}>
           <TextInput
             style={styles.commentInput}
             placeholder="Yorum yaz..."
@@ -392,6 +394,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  headerCompact: {
+    paddingVertical: 10,
   },
   backButton: {
     minWidth: 56,
