@@ -62,6 +62,14 @@ export const buildRouteShareData = (trip, shareLink, authorName) => {
 export const normalizeRouteData = (routeData) => {
   if (!routeData || typeof routeData !== 'object') return null;
 
+  const hasExplicitRouteSignal =
+    !!routeData.id ||
+    !!routeData.share_link ||
+    !!routeData.title ||
+    (Array.isArray(routeData.stops) && routeData.stops.length > 0);
+
+  if (!hasExplicitRouteSignal) return null;
+
   const stops = Array.isArray(routeData.stops)
     ? routeData.stops.map((stop, index) => normalizeStop(stop, index))
     : [];
@@ -90,7 +98,7 @@ export const parseLegacyRouteContent = (content) => {
     .filter(Boolean);
 
   const route = {};
-  const cleanedLines = [];
+  const contentLines = [];
 
   lines.forEach((line) => {
     if (LEGACY_ROUTE_TITLE.test(line)) {
@@ -110,17 +118,15 @@ export const parseLegacyRouteContent = (content) => {
       route.share_link = line.match(URL_PATTERN)?.[0] || line;
       return;
     }
-    cleanedLines.push(line);
+    contentLines.push(line);
   });
 
-  const cleanedContent = cleanedLines.join('\n').trim();
-
-  if (!route.title && !route.share_link) {
-    return { cleanedContent, routeData: null };
+  if (!route.title) {
+    return { cleanedContent: lines.join('\n').trim(), routeData: null };
   }
 
   return {
-    cleanedContent,
+    cleanedContent: contentLines.join('\n').trim(),
     routeData: normalizeRouteData({
       title: route.title,
       summary: 'Rota paylasimi',

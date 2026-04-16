@@ -497,14 +497,18 @@ export default function CreatePostScreen({ route }) {
           user?.full_name || user?.username || user?.email || null
         );
       }
-      await createPostMutation.mutateAsync({
+      const postData = {
         content: caption.trim(),
         media_urls: mediaUrls,
         location: taggedLocation?.name || null,
         visibility,
-        route_data: routeData || {},
         tags: selectedTrip?.id ? Array.from(new Set([...tags, 'trip-share'])) : tags,
-      });
+      };
+      if (routeData) {
+        postData.route_data = routeData;
+      }
+
+      await createPostMutation.mutateAsync(postData);
       Alert.alert('Basarili', 'Gonderiniz paylasildi.');
       navigation.navigate('CommunityFeed');
     } catch (error) {
