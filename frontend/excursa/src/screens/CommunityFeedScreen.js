@@ -10,6 +10,7 @@ import {
   Share,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -27,6 +28,34 @@ const QUICK_ITEMS = [
   { id: 'explore', title: 'Kesfet', subtitle: 'Harita' },
   { id: 'saved', title: 'Kayitlar', subtitle: 'Favoriler' },
 ];
+
+const normalizeText = (value) => String(value || '').trim().toLowerCase();
+
+const isSubsequence = (query, text) => {
+  if (!query) return true;
+  let q = 0;
+  for (let i = 0; i < text.length && q < query.length; i += 1) {
+    if (text[i] === query[q]) q += 1;
+  }
+  return q === query.length;
+};
+
+const getUserSearchScore = (query, user) => {
+  const q = normalizeText(query);
+  if (!q) return 0;
+
+  const fullName = normalizeText(user?.full_name);
+  const username = normalizeText(user?.username);
+
+  if (fullName.startsWith(q)) return 320;
+  if (username.startsWith(q)) return 280;
+  if (fullName.includes(q)) return 220;
+  if (username.includes(q)) return 180;
+  if (isSubsequence(q, fullName)) return 120;
+  if (isSubsequence(q, username)) return 90;
+
+  return 0;
+};
 
 export default function CommunityFeedScreen() {
   const navigation = useNavigation();
@@ -53,11 +82,47 @@ export default function CommunityFeedScreen() {
   const [showPostOptions, setShowPostOptions] = useState(false);
   const [showCreateOptions, setShowCreateOptions] = useState(false);
   const [showShareOptions, setShowShareOptions] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
 
   const posts = useMemo(
     () => data?.pages?.flatMap((page) => page.results) || [],
     [data]
   );
+  const discoveredUsers = useMemo(() => {
+    const unique = new Map();
+
+    posts.forEach((post) => {
+      const id = post?.user_ref_id || post?.user_id;
+      if (!id || unique.has(id)) return;
+
+      const fullName = String(
+        post?.user_name || post?.full_name || post?.user?.full_name || post?.user?.name || ''
+      ).trim();
+      const usernameRaw = String(
+        post?.username || post?.user_username || post?.user?.username || ''
+      ).trim();
+
+      unique.set(id, {
+        id,
+        full_name: fullName || 'Unknown User',
+        username: usernameRaw ? (usernameRaw.startsWith('@') ? usernameRaw : `@${usernameRaw}`) : '@gezgin',
+        avatar_url: post?.avatar_url || post?.user?.avatar_url || null,
+      });
+    });
+
+    return Array.from(unique.values());
+  }, [posts]);
+  const suggestedUsers = useMemo(() => {
+    const q = userSearchQuery.trim();
+    if (!q) return [];
+
+    return discoveredUsers
+      .map((item) => ({ item, score: getUserSearchScore(q, item) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map((entry) => entry.item);
+  }, [discoveredUsers, userSearchQuery]);
   const isCompact = width < 380;
   const fabBottom = (Platform.OS === 'ios' ? 86 : 74) + insets.bottom;
   const feedBottomPadding = fabBottom + 74;
@@ -207,14 +272,70 @@ export default function CommunityFeedScreen() {
     }
   }, [navigation]);
 
-  const renderHeader = () => (
+  const handleSuggestedUserPress = useCallback((targetUser) => {
+    if (!targetUser?.id) return;
+    setUserSearchQuery('');
+    navigation.navigate('UserProfile', {
+      userId: targetUser.id,
+      full_name: targetUser.full_name,
+      avatar_url: targetUser.avatar_url,
+    });
+  }, [navigation]);
+  const handleSearchFocus = useCallback((event) => {
+    if (Platform.OS !== 'web') return;
+    const target = event?.target;
+    if (target?.style) {
+      target.style.outline = 'none';
+      target.style.boxShadow = 'none';
+    }
+  }, []);
+
+  const headerComponent = useMemo(() => (
     <View style={[styles.headerWrap, { maxWidth: contentMaxWidth }]}>
       <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
         <View>
           <Text style={styles.brand}>EXCURSA</Text>
           <Text style={[styles.title, isCompact && styles.titleCompact]}>Akis</Text>
         </View>
+        <View style={styles.topSearchWrap}>
+          <Text style={styles.topSearchIcon}>⌕</Text>
+          <TextInput
+            value={userSearchQuery}
+            onChangeText={setUserSearchQuery}
+            placeholder="Kullanici ara"
+            placeholderTextColor="#9d8f78"
+            autoCapitalize="none"
+            autoCorrect={false}
+            selectionColor="#1a1a2e"
+            cursorColor="#1a1a2e"
+            onFocus={handleSearchFocus}
+            style={[styles.topSearchInput, Platform.OS === 'web' && styles.topSearchInputWeb]}
+          />
+        </View>
       </View>
+
+      {userSearchQuery.trim() ? (
+        <View style={styles.topSuggestionsWrap}>
+          {suggestedUsers.length ? (
+            suggestedUsers.map((item) => (
+              <TouchableOpacity
+                key={String(item.id)}
+                style={styles.topSuggestionRow}
+                activeOpacity={0.85}
+                onPress={() => handleSuggestedUserPress(item)}
+              >
+                <View style={styles.topSuggestionMeta}>
+                  <Text numberOfLines={1} style={styles.topSuggestionName}>{item.full_name}</Text>
+                  <Text numberOfLines={1} style={styles.topSuggestionHandle}>{item.username}</Text>
+                </View>
+                <Text style={styles.topSuggestionArrow}>›</Text>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <Text style={styles.topSuggestionEmpty}>Yakin isim bulunamadi.</Text>
+          )}
+        </View>
+      ) : null}
 
       <FlatList
         data={QUICK_ITEMS}
@@ -236,8 +357,9 @@ export default function CommunityFeedScreen() {
           </Pressable>
         )}
       />
+
     </View>
-  );
+  ), [contentMaxWidth, isCompact, userSearchQuery, suggestedUsers, handleQuickAction, handleSuggestedUserPress, handleSearchFocus]);
 
   const renderState = (title, subtitle, actionLabel, action) => (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -278,7 +400,7 @@ export default function CommunityFeedScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={[styles.emptyHeaderWrap, { maxWidth: contentMaxWidth }]}>
-          {renderHeader()}
+          {headerComponent}
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>Henuz gonderi yok</Text>
             <Text style={styles.emptySubtitle}>
@@ -312,7 +434,7 @@ export default function CommunityFeedScreen() {
             onMorePress={openPostOptions}
           />
         )}
-        ListHeaderComponent={renderHeader}
+        ListHeaderComponent={headerComponent}
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.45}
         contentContainerStyle={[styles.feedContent, { paddingBottom: feedBottomPadding }]}
@@ -466,9 +588,10 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
     marginBottom: 16,
     paddingHorizontal: 2,
+    gap: 10,
   },
   topBarCompact: {
     marginBottom: 12,
@@ -487,6 +610,86 @@ const styles = StyleSheet.create({
   },
   titleCompact: {
     fontSize: 28,
+  },
+  topSearchWrap: {
+    height: 42,
+    minWidth: 156,
+    maxWidth: 220,
+    flex: 1,
+    borderRadius: 14,
+    backgroundColor: '#f4eddf',
+    borderWidth: 1,
+    borderColor: '#e1d5bf',
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  topSearchIcon: {
+    color: '#746b5e',
+    fontSize: 15,
+    marginRight: 7,
+  },
+  topSearchInput: {
+    flex: 1,
+    color: '#1a1a2e',
+    fontSize: 13,
+    fontWeight: '700',
+    paddingVertical: 0,
+    borderWidth: 0,
+    outlineWidth: 0,
+    outlineColor: 'transparent',
+  },
+  topSearchInputWeb: {
+    outlineStyle: 'none',
+    boxShadow: 'none',
+  },
+  topSuggestionsWrap: {
+    alignSelf: 'flex-end',
+    width: '100%',
+    maxWidth: 220,
+    marginTop: -8,
+    marginBottom: 10,
+    borderRadius: 12,
+    backgroundColor: '#fffdf8',
+    borderWidth: 1,
+    borderColor: '#e1d5bf',
+    overflow: 'hidden',
+  },
+  topSuggestionRow: {
+    minHeight: 42,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee5d5',
+  },
+  topSuggestionMeta: {
+    flex: 1,
+  },
+  topSuggestionName: {
+    color: '#1a1a2e',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  topSuggestionHandle: {
+    color: '#7e7261',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 1,
+  },
+  topSuggestionArrow: {
+    color: '#8f7e63',
+    fontSize: 18,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  topSuggestionEmpty: {
+    color: '#7e7261',
+    fontSize: 12,
+    fontWeight: '700',
+    paddingHorizontal: 10,
+    paddingVertical: 12,
   },
   quickRail: {
     paddingRight: 18,
