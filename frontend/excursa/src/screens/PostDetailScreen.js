@@ -20,7 +20,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatTimeAgo } from '../components/SocialPostCard';
 import RouteShareCard from '../components/RouteShareCard';
-import { useAddComment, usePost, usePostComments, useToggleLike } from '../hooks/useSocial';
+import { useAddComment, usePost, usePostComments, useToggleLike, useToggleSave } from '../hooks/useSocial';
 import { buildPostLink, copyTextToClipboard } from '../utils/linkUtils';
 import { getPostPresentation } from '../utils/routeShareUtils';
 
@@ -42,6 +42,7 @@ export default function PostDetailScreen() {
   } = usePostComments(postId);
 
   const toggleLikeMutation = useToggleLike();
+  const toggleSaveMutation = useToggleSave();
   const addCommentMutation = useAddComment(postId);
   const [commentText, setCommentText] = useState('');
   const [showShareOptions, setShowShareOptions] = useState(false);
@@ -69,6 +70,11 @@ export default function PostDetailScreen() {
   const handleLike = () => {
     if (!postId) return;
     toggleLikeMutation.mutate(postId);
+  };
+
+  const handleSave = () => {
+    if (!postId) return;
+    toggleSaveMutation.mutate(postId);
   };
 
   const handleCopyLink = async () => {
@@ -193,6 +199,10 @@ export default function PostDetailScreen() {
         <TouchableOpacity style={styles.actionButton} onPress={handleSharePress}>
           <Text style={styles.linkIcon}>↗</Text>
           <Text style={styles.actionText}>Paylas</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionButton} onPress={handleSave}>
+          <Text style={styles.linkIcon}>{post?.saved ? '🔖' : '📑'}</Text>
+          <Text style={styles.actionText}>{post?.saved ? 'Kaydedildi' : 'Kaydet'}</Text>
         </TouchableOpacity>
       </View>
     </View>

@@ -19,6 +19,19 @@ const applyLikeToggle = (post) => {
   };
 };
 
+const applySaveToggle = (post) => {
+  if (!post) return post;
+
+  const currentlySaved = !!post.saved;
+  const currentSaves = Number(post.saves_count) || 0;
+
+  return {
+    ...post,
+    saved: !currentlySaved,
+    saves_count: Math.max(0, currentlySaved ? currentSaves - 1 : currentSaves + 1),
+  };
+};
+
 const updatePostInsideFeedPages = (feedData, postId, updater) => {
   if (!feedData?.pages) return feedData;
 
@@ -30,6 +43,23 @@ const updatePostInsideFeedPages = (feedData, postId, updater) => {
         ? page.results.map((post) => (post?.id === postId ? updater(post) : post))
         : [],
     })),
+  };
+};
+
+const mergeSaveResponse = (existingPost, response) => {
+  if (!existingPost) return existingPost;
+
+  const serverPost = response?.post || {};
+  const hasServerSaved = typeof response?.saved === 'boolean';
+
+  return {
+    ...existingPost,
+    ...serverPost,
+    saved: hasServerSaved ? response.saved : (serverPost.saved ?? existingPost.saved),
+    saves_count:
+      typeof serverPost.saves_count === 'number'
+        ? serverPost.saves_count
+        : existingPost.saves_count,
   };
 };
 
@@ -53,7 +83,7 @@ const mergeLikeResponse = (existingPost, response) => {
 /**
  * Hook: Fetch home feed with infinite scroll pagination
  */
-export const useFeed = () => {
+export const useFeed = (enabled = true) => {
   return useInfiniteQuery({
     queryKey: ['feed'],
     queryFn: async ({ pageParam = null }) => {
@@ -61,7 +91,21 @@ export const useFeed = () => {
       return response;
     },
     getNextPageParam: (lastPage) => lastPage.nextPageCursor || undefined,
+    enabled,
     staleTime: 2 * 60 * 1000, // 2 minutes
+  });
+};
+
+export const useSavedPosts = (enabled = true) => {
+  return useInfiniteQuery({
+    queryKey: ['savedPosts'],
+    queryFn: async ({ pageParam = null }) => {
+      const response = await SocialService.fetchSavedPosts(pageParam, 10);
+      return response;
+    },
+    getNextPageParam: (lastPage) => lastPage.nextPageCursor || undefined,
+    enabled,
+    staleTime: 2 * 60 * 1000,
   });
 };
 
@@ -308,6 +352,71 @@ export const useToggleLike = () => {
           mergeLikeResponse(existingPost, response)
         )
       );
+    },
+  });
+};
+
+export const useToggleSave = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (targetPostId) => SocialService.toggleSave(targetPostId),
+    onMutate: async (targetPostId) => {
+      if (!targetPostId) return {};
+
+      await queryClient.cancelQueries({ queryKey: ['post', targetPostId] });
+      await queryClient.cancelQueries({ queryKey: ['feed'] });
+      await queryClient.cancelQueries({ queryKey: ['savedPosts'] });
+
+      const previousPost = queryClient.getQueryData(['post', targetPostId]);
+      const previousFeed = queryClient.getQueryData(['feed']);
+      const previousSavedPosts = queryClient.getQueryData(['savedPosts']);
+
+      if (previousPost) {
+        queryClient.setQueryData(['post', targetPostId], applySaveToggle(previousPost));
+      }
+
+      if (previousFeed) {
+        queryClient.setQueryData(
+          ['feed'],
+          updatePostInsideFeedPages(previousFeed, targetPostId, applySaveToggle)
+        );
+      }
+
+      if (previousSavedPosts) {
+        queryClient.setQueryData(
+          ['savedPosts'],
+          updatePostInsideFeedPages(previousSavedPosts, targetPostId, applySaveToggle)
+        );
+      }
+
+      return { previousPost, previousFeed, previousSavedPosts, targetPostId };
+    },
+    onError: (_, __, context) => {
+      if (!context?.targetPostId) return;
+
+      if (context?.previousPost) {
+        queryClient.setQueryData(['post', context.targetPostId], context.previousPost);
+      }
+      if (context?.previousFeed) {
+        queryClient.setQueryData(['feed'], context.previousFeed);
+      }
+      if (context?.previousSavedPosts) {
+        queryClient.setQueryData(['savedPosts'], context.previousSavedPosts);
+      }
+    },
+    onSuccess: (response, targetPostId) => {
+      if (!targetPostId) return;
+
+      queryClient.setQueryData(['post', targetPostId], (existingPost) =>
+        mergeSaveResponse(existingPost, response)
+      );
+      queryClient.setQueryData(['feed'], (oldFeed) =>
+        updatePostInsideFeedPages(oldFeed, targetPostId, (existingPost) =>
+          mergeSaveResponse(existingPost, response)
+        )
+      );
+      queryClient.invalidateQueries({ queryKey: ['savedPosts'] });
     },
   });
 };

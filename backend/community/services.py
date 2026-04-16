@@ -269,9 +269,11 @@ class FeedService:
             pass
         
         liked = False
+        saved = False
         if current_user_id:
             current_user_str = str(current_user_id)
             liked = any(str(like_user_id) == current_user_str for like_user_id in post.likes)
+            saved = any(str(saved_user_id) == current_user_str for saved_user_id in (post.saved_by or []))
 
         return {
             'id': str(post.id),
@@ -282,6 +284,7 @@ class FeedService:
             'media_urls': post.media_urls,
             'location': post.location,
             'likes_count': len(post.likes),
+            'saves_count': len(post.saved_by or []),
             'comments_count': len(post.comments),
             'comments': [
                 self._comment_to_dto(c) for c in post.comments
@@ -292,6 +295,7 @@ class FeedService:
             'visibility': post.visibility,
             'virality_score': self.calculate_virality_score(post),
             'liked': liked,
+            'saved': saved,
         }
 
     def _comment_to_dto(self, comment) -> dict:

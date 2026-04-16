@@ -33,6 +33,7 @@ class PostDTO(serializers.Serializer):
     )
     location = serializers.CharField(required=False, allow_null=True)
     likes_count = serializers.IntegerField(read_only=True)
+    saves_count = serializers.IntegerField(read_only=True)
     comments_count = serializers.IntegerField(read_only=True)
     comments = EmbeddedCommentSerializer(many=True, read_only=True)
     tags = serializers.ListField(
@@ -48,6 +49,7 @@ class PostDTO(serializers.Serializer):
     )
     virality_score = serializers.FloatField(read_only=True)
     liked = serializers.BooleanField(read_only=True)
+    saved = serializers.BooleanField(read_only=True)
 
 
 class SocialPostCreateSerializer(serializers.Serializer):
@@ -123,6 +125,11 @@ class AddCommentSerializer(serializers.Serializer):
 class ToggleLikeSerializer(serializers.Serializer):
     """Serializer for toggling a like on a post."""
     liked = serializers.BooleanField(read_only=True)
+
+
+class ToggleSaveSerializer(serializers.Serializer):
+    """Serializer for toggling a save on a post."""
+    saved = serializers.BooleanField(read_only=True)
 
 
 class CommentListSerializer(serializers.Serializer):

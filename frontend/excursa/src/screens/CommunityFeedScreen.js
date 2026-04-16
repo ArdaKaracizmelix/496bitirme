@@ -18,12 +18,12 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import SocialPostCard from '../components/SocialPostCard';
-import { useDeletePost, useFeed, useToggleLike } from '../hooks/useSocial';
+import { useDeletePost, useFeed, useSavedPosts, useToggleLike, useToggleSave } from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
 import { buildPostLink, copyTextToClipboard } from '../utils/linkUtils';
 
 const QUICK_ITEMS = [
-  { id: 'share', title: 'Paylas', subtitle: 'Yeni ani', tone: 'dark' },
+  { id: 'feed', title: 'Akis', subtitle: 'Sosyal feed' },
   { id: 'route', title: 'Rota', subtitle: 'Gezi plani' },
   { id: 'explore', title: 'Kesfet', subtitle: 'Harita' },
   { id: 'saved', title: 'Kayitlar', subtitle: 'Favoriler' },
@@ -62,7 +62,10 @@ export default function CommunityFeedScreen() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const [activeList, setActiveList] = useState('feed');
   const currentUserId = user?.id || user?.profile_id || user?.profile?.id;
+  const feedQuery = useFeed(activeList === 'feed');
+  const savedPostsQuery = useSavedPosts(activeList === 'saved');
   const {
     data,
     isLoading,
@@ -72,9 +75,10 @@ export default function CommunityFeedScreen() {
     isFetchingNextPage,
     refetch,
     isRefetching,
-  } = useFeed();
+  } = activeList === 'saved' ? savedPostsQuery : feedQuery;
 
   const toggleLikeMutation = useToggleLike();
+  const toggleSaveMutation = useToggleSave();
   const deletePostMutation = useDeletePost();
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPostId, setSelectedPostId] = useState(null);
@@ -144,6 +148,10 @@ export default function CommunityFeedScreen() {
   const handleLike = useCallback((postId) => {
     toggleLikeMutation.mutate(postId);
   }, [toggleLikeMutation]);
+
+  const handleSave = useCallback((postId) => {
+    toggleSaveMutation.mutate(postId);
+  }, [toggleSaveMutation]);
 
   const showFeedback = useCallback((title, message) => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -255,8 +263,8 @@ export default function CommunityFeedScreen() {
   }, [selectedSharePost, showFeedback]);
 
   const handleQuickAction = useCallback((itemId) => {
-    if (itemId === 'share') {
-      setShowCreateOptions(true);
+    if (itemId === 'feed') {
+      setActiveList('feed');
       return;
     }
     if (itemId === 'route') {
@@ -268,7 +276,8 @@ export default function CommunityFeedScreen() {
       return;
     }
     if (itemId === 'saved') {
-      navigation.navigate('Trips');
+      setActiveList((prev) => (prev === 'saved' ? 'feed' : 'saved'));
+      return;
     }
   }, [navigation]);
 
@@ -295,7 +304,9 @@ export default function CommunityFeedScreen() {
       <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
         <View>
           <Text style={styles.brand}>EXCURSA</Text>
-          <Text style={[styles.title, isCompact && styles.titleCompact]}>Akis</Text>
+          <Text style={[styles.title, isCompact && styles.titleCompact]}>
+            {activeList === 'saved' ? 'Kaydedilenler' : 'Akis'}
+          </Text>
         </View>
         <View style={styles.topSearchWrap}>
           <Text style={styles.topSearchIcon}>⌕</Text>
@@ -343,23 +354,29 @@ export default function CommunityFeedScreen() {
         keyExtractor={(item) => item.id}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.quickRail}
-        renderItem={({ item }) => (
-          <Pressable
-            style={[styles.quickCard, item.tone === 'dark' && styles.quickCardDark]}
-            onPress={() => handleQuickAction(item.id)}
-          >
-            <Text style={[styles.quickTitle, item.tone === 'dark' && styles.quickTitleDark]}>
-              {item.title}
-            </Text>
-            <Text style={[styles.quickSubtitle, item.tone === 'dark' && styles.quickSubtitleDark]}>
-              {item.subtitle}
-            </Text>
-          </Pressable>
-        )}
+        renderItem={({ item }) => {
+          const isActive =
+            (item.id === 'feed' && activeList === 'feed') ||
+            (item.id === 'saved' && activeList === 'saved');
+
+          return (
+            <Pressable
+              style={[styles.quickCard, isActive && styles.quickCardActive]}
+              onPress={() => handleQuickAction(item.id)}
+            >
+              <Text style={[styles.quickTitle, isActive && styles.quickTitleActive]}>
+                {item.title}
+              </Text>
+              <Text style={[styles.quickSubtitle, isActive && styles.quickSubtitleActive]}>
+                {item.subtitle}
+              </Text>
+            </Pressable>
+          );
+        }}
       />
 
     </View>
-  ), [contentMaxWidth, isCompact, userSearchQuery, suggestedUsers, handleQuickAction, handleSuggestedUserPress, handleSearchFocus]);
+  ), [contentMaxWidth, isCompact, userSearchQuery, suggestedUsers, handleQuickAction, handleSuggestedUserPress, handleSearchFocus, activeList]);
 
   const renderState = (title, subtitle, actionLabel, action) => (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -402,16 +419,22 @@ export default function CommunityFeedScreen() {
         <View style={[styles.emptyHeaderWrap, { maxWidth: contentMaxWidth }]}>
           {headerComponent}
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Henuz gonderi yok</Text>
-            <Text style={styles.emptySubtitle}>
-              Ilk gezi anini paylasarak akisi baslatabilirsin.
+            <Text style={styles.emptyTitle}>
+              {activeList === 'saved' ? 'Kayitli gonderi yok' : 'Henuz gonderi yok'}
             </Text>
-            <TouchableOpacity
-              style={styles.stateButton}
-              onPress={() => setShowCreateOptions(true)}
-            >
-              <Text style={styles.stateButtonText}>Ilk gonderini olustur</Text>
-            </TouchableOpacity>
+            <Text style={styles.emptySubtitle}>
+              {activeList === 'saved'
+                ? 'Bir gonderiyi kaydedince burada gorunecek.'
+                : 'Ilk gezi anini paylasarak akisi baslatabilirsin.'}
+            </Text>
+            {activeList === 'saved' ? null : (
+              <TouchableOpacity
+                style={styles.stateButton}
+                onPress={() => setShowCreateOptions(true)}
+              >
+                <Text style={styles.stateButtonText}>Ilk gonderini olustur</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </SafeAreaView>
@@ -430,6 +453,7 @@ export default function CommunityFeedScreen() {
             onLike={handleLike}
             onComment={handleCommentPress}
             onShare={handleSharePress}
+            onSave={handleSave}
             onUserPress={handleUserPress}
             onMorePress={openPostOptions}
           />
@@ -704,7 +728,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e8dfcf',
   },
-  quickCardDark: {
+  quickCardActive: {
     backgroundColor: '#1a1a2e',
     borderColor: '#1a1a2e',
   },
@@ -714,7 +738,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginBottom: 3,
   },
-  quickTitleDark: {
+  quickTitleActive: {
     color: '#fff',
   },
   quickSubtitle: {
@@ -722,7 +746,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  quickSubtitleDark: {
+  quickSubtitleActive: {
     color: '#d7c49e',
   },
   stateContainer: {

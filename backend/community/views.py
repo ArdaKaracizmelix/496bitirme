@@ -12,7 +12,7 @@ from mongoengine.queryset.visitor import Q
 from .models import SocialPost
 from .serializers import (
     PostDTO, SocialPostCreateSerializer, SocialPostUpdateSerializer,
-    AddCommentSerializer, ToggleLikeSerializer, FeedSerializer
+    AddCommentSerializer, FeedSerializer
 )
 from .services import FeedService
 import uuid
@@ -376,6 +376,69 @@ class SocialPostViewSet(viewsets.ViewSet):
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+    @action(detail=True, methods=['post'])
+    def toggle_save(self, request, pk=None):
+        """Toggle save/bookmark on a post."""
+        if not request.user.is_authenticated:
+            return Response(
+                {'error': 'Authentication required'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        try:
+            post = SocialPost.objects(id=pk).first()
+            if not post:
+                return Response(
+                    {'error': 'Post not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            saved = post.toggle_save(request.user.profile.id)
+
+            return Response({
+                'saved': saved,
+                'post': self.service._post_to_dto(post, current_user_id=self._viewer_profile_id(request))
+            })
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=False, methods=['get'])
+    def saved(self, request):
+        """List posts saved by the authenticated user."""
+        if not request.user.is_authenticated:
+            return Response(
+                {'error': 'Authentication required'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        limit = int(request.query_params.get('limit', 10))
+        skip = int(request.query_params.get('skip', 0))
+
+        posts = SocialPost.objects(
+            saved_by=request.user.profile.id,
+            visibility__in=['PUBLIC', 'FOLLOWERS']
+        ).order_by('-created_at').skip(skip).limit(limit + 1)
+        post_list = list(posts)
+
+        has_next = len(post_list) > limit
+        if has_next:
+            post_list = post_list[:limit]
+
+        serializer = PostDTO(
+            [self.service._post_to_dto(p, current_user_id=self._viewer_profile_id(request)) for p in post_list],
+            many=True
+        )
+
+        next_cursor = skip + limit if has_next else None
+        return Response({
+            'count': len(serializer.data),
+            'results': serializer.data,
+            'nextPageCursor': next_cursor
+        })
 
 
 class UserPostsView(APIView):

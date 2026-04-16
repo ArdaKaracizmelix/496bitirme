@@ -59,6 +59,22 @@ class SocialPostTestCase(unittest.TestCase):
         self.post.reload()
         self.assertNotIn(user_id, self.post.likes)
 
+    def test_toggle_save(self):
+        """Test toggling save on a post."""
+        user_id = uuid.uuid4()
+
+        # First toggle - should save
+        saved = self.post.toggle_save(user_id)
+        self.assertTrue(saved)
+        self.post.reload()
+        self.assertIn(user_id, self.post.saved_by)
+
+        # Second toggle - should unsave
+        saved = self.post.toggle_save(user_id)
+        self.assertFalse(saved)
+        self.post.reload()
+        self.assertNotIn(user_id, self.post.saved_by)
+
 
 class FeedServiceTestCase(unittest.TestCase):
     """Test cases for FeedService."""
@@ -179,6 +195,30 @@ class CommunityAPITestCase(APITestCase):
         finally:
             # Cleanup
             post.delete()
+
+    def test_toggle_save_api_and_list_saved(self):
+        """Test saving a post and listing saved posts via API."""
+        post = SocialPost(
+            user_ref_id=self.profile.id,
+            content="Save Me",
+            visibility="PUBLIC"
+        )
+        post.save()
+        self.created_post_ids.append(str(post.id))
+
+        toggle_url = reverse('socialpost-toggle-save', kwargs={'pk': str(post.id)})
+        toggle_response = self.client.post(toggle_url)
+        self.assertEqual(toggle_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(toggle_response.data['saved'])
+
+        post.reload()
+        self.assertIn(self.profile.id, post.saved_by)
+
+        saved_url = reverse('socialpost-saved')
+        saved_response = self.client.get(saved_url)
+        self.assertEqual(saved_response.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(saved_response.data.get('count', 0), 1)
+        self.assertTrue(any(item.get('id') == str(post.id) for item in saved_response.data.get('results', [])))
 
 if __name__ == '__main__':
     unittest.main()

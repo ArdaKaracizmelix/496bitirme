@@ -18,6 +18,7 @@ export default function SocialPostCard({
   onLike,
   onComment,
   onShare,
+  onSave,
   onUserPress,
   onMorePress,
 }) {
@@ -84,6 +85,11 @@ export default function SocialPostCard({
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton} onPress={() => onShare(post)}>
             <Text style={styles.actionIcon}>↗</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={() => onSave?.(post.id)}>
+            <Text style={[styles.bookmarkIcon, post?.saved && styles.bookmarkActive]}>
+              {post?.saved ? '🔖' : '📑'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -267,6 +273,12 @@ const styles = StyleSheet.create({
   },
   likeActive: {
     color: '#d43f57',
+  },
+  bookmarkIcon: {
+    fontSize: 18,
+  },
+  bookmarkActive: {
+    opacity: 1,
   },
   body: {
     paddingHorizontal: 16,

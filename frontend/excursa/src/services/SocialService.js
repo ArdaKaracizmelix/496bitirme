@@ -59,6 +59,23 @@ class SocialService {
   }
 
   /**
+   * Fetch saved posts for the current user
+   */
+  async fetchSavedPosts(cursor = null, limit = 10) {
+    try {
+      const params = { limit };
+      if (typeof cursor === 'number') {
+        params.skip = cursor;
+      }
+      const response = await api.get('/community/posts/saved/', { params });
+      return this.normalizeFeedResponse(response.data);
+    } catch (error) {
+      console.error('Error fetching saved posts:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Fetch profile details for current or specific user.
    */
   async fetchUserProfile(userId = null) {
@@ -202,6 +219,19 @@ class SocialService {
       return response.data;
     } catch (error) {
       console.error(`Error toggling like on post ${postId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Toggle save/bookmark on a post
+   */
+  async toggleSave(postId) {
+    try {
+      const response = await api.post(`/community/posts/${postId}/toggle_save/`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error toggling save on post ${postId}:`, error);
       throw error;
     }
   }

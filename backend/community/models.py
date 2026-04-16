@@ -44,6 +44,9 @@ class SocialPost(Document):
     
     # Array of User IDs who liked the post
     likes = ListField(UUIDField(), default=list)
+
+    # Array of User IDs who saved/bookmarked the post
+    saved_by = ListField(UUIDField(), default=list)
     
     # Nested array of comment objects for fast retrieval without joins
     comments = ListField(EmbeddedDocumentField(EmbeddedComment), default=list)
@@ -69,7 +72,8 @@ class SocialPost(Document):
             'user_ref_id',
             '-created_at',
             'tags',
-            'visibility'
+            'visibility',
+            'saved_by',
         ]
     }
     
@@ -104,6 +108,20 @@ class SocialPost(Document):
             self.likes.append(user_id)
             self.save()
             return True
+
+    def toggle_save(self, user_id: uuid.UUID) -> bool:
+        """
+        Toggles save/bookmark state for the given user.
+        Returns True if post is now saved, False otherwise.
+        """
+        if user_id in self.saved_by:
+            self.saved_by.remove(user_id)
+            self.save()
+            return False
+
+        self.saved_by.append(user_id)
+        self.save()
+        return True
     
     @classmethod
     def get_recent_posts(cls, limit: int = 10, skip: int = 0):
