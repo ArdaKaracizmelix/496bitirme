@@ -99,6 +99,32 @@ class SocialService {
   }
 
   /**
+   * Fetch followers list for a profile
+   */
+  async fetchFollowers(userId) {
+    try {
+      const response = await api.get(`/user/${userId}/followers/`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching followers for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch following list for a profile
+   */
+  async fetchFollowing(userId) {
+    try {
+      const response = await api.get(`/user/${userId}/following/`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching following for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Fetch posts from a specific user (for profile)
    */
   async fetchUserPosts(userId, limit = 10) {

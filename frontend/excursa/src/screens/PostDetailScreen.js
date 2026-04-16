@@ -121,9 +121,21 @@ export default function PostDetailScreen() {
     }
   };
 
+  const openUserProfile = (profileId, fallbackName, avatarUrl) => {
+    if (!profileId) return;
+    navigation.navigate('UserProfile', {
+      userId: String(profileId),
+      full_name: fallbackName,
+      avatar_url: avatarUrl,
+    });
+  };
+
   const renderPostHeader = () => (
     <View style={[styles.postCard, { maxWidth: contentMaxWidth }]}>
-      <View style={styles.ownerRow}>
+      <TouchableOpacity
+        style={styles.ownerRow}
+        onPress={() => openUserProfile(post?.user_ref_id || post?.user_id, post?.user_name, post?.avatar_url)}
+      >
         <Image
           source={{ uri: post?.avatar_url || FALLBACK_AVATAR }}
           style={styles.ownerAvatar}
@@ -136,7 +148,7 @@ export default function PostDetailScreen() {
             {post?.location ? post.location : 'Excursa seyahat akisi'} · {formatTimeAgo(post?.created_at)}
           </Text>
         </View>
-      </View>
+      </TouchableOpacity>
 
       {hasMedia ? (
         <View style={styles.mediaStack}>
@@ -184,17 +196,27 @@ export default function PostDetailScreen() {
     </View>
   );
 
-  const renderComment = ({ item, index }) => (
+  const renderComment = ({ item }) => (
     <View style={styles.commentItem}>
-      <Image
-        source={{ uri: item?.avatar_url || FALLBACK_AVATAR }}
-        style={styles.commentAvatar}
-      />
+      <TouchableOpacity
+        style={styles.commentOwnerPress}
+        onPress={() => openUserProfile(item?.user_id, item?.user_name, item?.avatar_url)}
+      >
+        <Image
+          source={{ uri: item?.avatar_url || FALLBACK_AVATAR }}
+          style={styles.commentAvatar}
+        />
+      </TouchableOpacity>
       <View style={styles.commentBubble}>
         <View style={styles.commentHeader}>
-          <Text style={styles.commentAuthor} numberOfLines={1}>
-            {item?.user_name || 'Gezgin'}
-          </Text>
+          <TouchableOpacity
+            style={styles.commentAuthorPress}
+            onPress={() => openUserProfile(item?.user_id, item?.user_name, item?.avatar_url)}
+          >
+            <Text style={styles.commentAuthor} numberOfLines={1}>
+              {item?.user_name || 'Gezgin'}
+            </Text>
+          </TouchableOpacity>
           <Text style={styles.commentTime}>{formatTimeAgo(item?.timestamp)}</Text>
         </View>
         <Text style={styles.commentText}>{item?.text}</Text>
@@ -543,6 +565,10 @@ const styles = StyleSheet.create({
     marginRight: 10,
     backgroundColor: '#eee5d7',
   },
+  commentOwnerPress: {
+    borderRadius: 17,
+    alignSelf: 'flex-start',
+  },
   commentBubble: {
     flex: 1,
     borderRadius: 18,
@@ -559,10 +585,12 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   commentAuthor: {
-    flex: 1,
     color: '#1a1a2e',
     fontSize: 13,
     fontWeight: '900',
+  },
+  commentAuthorPress: {
+    flex: 1,
   },
   commentTime: {
     color: '#9a9184',

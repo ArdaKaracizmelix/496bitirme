@@ -18,6 +18,7 @@ import CreatePostScreen from '../screens/CreatePostScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import PostDetailScreen from '../screens/PostDetailScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
+import FollowersListScreen from '../screens/FollowersListScreen';
 
 import useAuthStore from '../store/authStore';
 
@@ -115,6 +116,13 @@ function ProfileStack() {
           animationEnabled: true,
         }}
       />
+      <Stack.Screen
+        name="FollowersList"
+        component={FollowersListScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
     </Stack.Navigator>
   );
 }
@@ -168,6 +176,13 @@ function SocialStack() {
       <Stack.Screen 
         name="PostDetail" 
         component={PostDetailScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="FollowersList"
+        component={FollowersListScreen}
         options={{
           animationEnabled: true,
         }}

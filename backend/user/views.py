@@ -12,9 +12,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import UserProfile
+from .models import FollowRelation, UserProfile
 from .interest_service import InterestService
 from .serializers import (
+    FollowListProfileSerializer,
     FollowActionSerializer,
     LoginRequestSerializer,
     LogoutRequestSerializer,
@@ -613,6 +614,40 @@ class UnfollowView(APIView):
             serializer.data,
             status=status.HTTP_200_OK
 
+        )
+
+
+class FollowersListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, id):
+        profile = get_object_or_404(UserProfile, id=id)
+        follower_ids = FollowRelation.objects.filter(following=profile).values_list("follower_id", flat=True)
+        followers = UserProfile.objects.filter(id__in=follower_ids).select_related("user").order_by("user__username")
+        serializer = FollowListProfileSerializer(followers, many=True, context={"request": request})
+        return Response(
+            {
+                "count": followers.count(),
+                "results": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class FollowingListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, id):
+        profile = get_object_or_404(UserProfile, id=id)
+        following_ids = FollowRelation.objects.filter(follower=profile).values_list("following_id", flat=True)
+        following = UserProfile.objects.filter(id__in=following_ids).select_related("user").order_by("user__username")
+        serializer = FollowListProfileSerializer(following, many=True, context={"request": request})
+        return Response(
+            {
+                "count": following.count(),
+                "results": serializer.data,
+            },
+            status=status.HTTP_200_OK,
         )
 
 

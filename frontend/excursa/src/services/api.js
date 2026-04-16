@@ -1,5 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
 const envApiUrl =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL) || '';
@@ -7,11 +9,65 @@ const envApiPort =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_PORT) || '8000';
 
 const normalizeApiUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
+const normalizeApiPath = (pathname = '') => {
+  const trimmed = String(pathname || '').replace(/\/+$/, '');
+  if (!trimmed || trimmed === '/') {
+    return '/api';
+  }
+  return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
+};
+
+const parseApiUrl = (value) => {
+  if (!value) return null;
+  const withProtocol = /^https?:\/\//i.test(value) ? value : `http://${value}`;
+  try {
+    return new URL(withProtocol);
+  } catch {
+    return null;
+  }
+};
+
+const getExpoDevHost = () => {
+  const hostUri =
+    Constants?.expoConfig?.hostUri ||
+    Constants?.manifest2?.extra?.expoGo?.debuggerHost ||
+    Constants?.manifest?.debuggerHost ||
+    '';
+  const host = String(hostUri).split(':')[0].trim();
+  if (!host || host === 'localhost' || host === '127.0.0.1') {
+    return '';
+  }
+  return host;
+};
+
+const isLoopbackHost = (hostname = '') =>
+  hostname === 'localhost' || hostname === '127.0.0.1';
 
 const resolveApiUrl = () => {
   const normalizedEnvUrl = normalizeApiUrl(envApiUrl);
-  if (normalizedEnvUrl) {
-    return normalizedEnvUrl;
+  const envUrl = parseApiUrl(normalizedEnvUrl);
+  if (envUrl) {
+    // Expo Go on a physical phone cannot access computer backend via localhost.
+    if (Platform.OS !== 'web' && isLoopbackHost(envUrl.hostname)) {
+      const expoHost = getExpoDevHost();
+      if (expoHost) {
+        envUrl.hostname = expoHost;
+        envUrl.port = envUrl.port || envApiPort;
+      }
+    }
+    envUrl.pathname = normalizeApiPath(envUrl.pathname);
+    return envUrl.toString().replace(/\/+$/, '');
+  }
+
+  if (normalizedEnvUrl && typeof console !== 'undefined') {
+    console.warn('[API] Invalid EXPO_PUBLIC_API_URL. Falling back to auto host detection.');
+  }
+
+  if (Platform.OS !== 'web') {
+    const expoHost = getExpoDevHost();
+    if (expoHost) {
+      return `http://${expoHost}:${envApiPort}/api`;
+    }
   }
 
   // Web fallback: keep host/protocol, but point to backend port (default 8000),

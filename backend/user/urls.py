@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     FollowView,
+    FollowersListView,
     InterestAvailableView,
     InterestSourceHealthView,
     InterestSubmitView,
@@ -12,6 +13,7 @@ from .views import (
     RefreshTokenView,
     RegisterView,
     UnfollowView,
+    FollowingListView,
     VerifyEmailView,
 )
 
@@ -28,4 +30,6 @@ urlpatterns = [
     path("<uuid:id>/", ProfileView.as_view(), name="profile"),
     path("<uuid:id>/follow/", FollowView.as_view(), name="follow"),
     path("<uuid:id>/unfollow/", UnfollowView.as_view(), name="unfollow"),
+    path("<uuid:id>/followers/", FollowersListView.as_view(), name="followers"),
+    path("<uuid:id>/following/", FollowingListView.as_view(), name="following"),
 ]
