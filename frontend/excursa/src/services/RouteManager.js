@@ -322,10 +322,17 @@ export class RouteManager {
    */
   static getCategoryColor(category) {
     const categoryColors = {
-      HISTORICAL: '#e74c3c',
-      NATURE: '#27ae60',
-      FOOD: '#f39c12',
+      CULTURE_HISTORY: '#8e44ad',
+      FOOD_DRINK: '#f39c12',
+      OUTDOOR_NATURE: '#27ae60',
       ENTERTAINMENT: '#9b59b6',
+      SHOPPING: '#3498db',
+      HEALTH_WELLNESS: '#1abc9c',
+      TRANSPORTATION: '#7f8c8d',
+      LODGING: '#16a085',
+      HISTORICAL: '#8e44ad',
+      FOOD: '#f39c12',
+      NATURE: '#27ae60',
       UNKNOWN: '#95a5a6',
     };
     return categoryColors[category] || categoryColors.UNKNOWN;
@@ -336,10 +343,17 @@ export class RouteManager {
    */
   static getCategoryEmoji(category) {
     const categoryEmojis = {
-      HISTORICAL: '🏛️',
-      NATURE: '🌿',
-      FOOD: '🍽️',
+      CULTURE_HISTORY: '🏛️',
+      FOOD_DRINK: '🍽️',
+      OUTDOOR_NATURE: '🌿',
       ENTERTAINMENT: '🎭',
+      SHOPPING: '🛍️',
+      HEALTH_WELLNESS: '🧘',
+      TRANSPORTATION: '🚆',
+      LODGING: '🏨',
+      HISTORICAL: '🏛️',
+      FOOD: '🍽️',
+      NATURE: '🌿',
       UNKNOWN: '📍',
     };
     return categoryEmojis[category] || categoryEmojis.UNKNOWN;
@@ -350,10 +364,17 @@ export class RouteManager {
    */
   static getCategoryLabelTR(category) {
     const categoryLabels = {
-      HISTORICAL: 'Tarihi',
-      NATURE: 'Doğa',
-      FOOD: 'Yemek',
+      CULTURE_HISTORY: 'Kultur ve tarih',
+      FOOD_DRINK: 'Yeme icme',
+      OUTDOOR_NATURE: 'Doga ve acik hava',
       ENTERTAINMENT: 'Eğlence',
+      SHOPPING: 'Alisveris',
+      HEALTH_WELLNESS: 'Saglik ve rahatlama',
+      TRANSPORTATION: 'Ulasim',
+      LODGING: 'Konaklama',
+      HISTORICAL: 'Kultur ve tarih',
+      FOOD: 'Yeme icme',
+      NATURE: 'Doga ve acik hava',
       UNKNOWN: 'Diğer',
     };
     return categoryLabels[category] || categoryLabels.UNKNOWN;

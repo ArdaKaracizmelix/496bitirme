@@ -29,6 +29,11 @@ AUTO_SYNC_GEOHASH_PRECISION = 5
 AUTO_SYNC_COOLDOWN_SECONDS = 30 * 60  # 30 minutes per geohash cell
 _AUTO_SYNC_FALLBACK_COOLDOWN = {}
 _AUTO_SYNC_FALLBACK_LOCK = threading.Lock()
+_LEGACY_CATEGORY_ALIASES = {
+    "HISTORICAL": POI.Category.CULTURE_HISTORY,
+    "NATURE": POI.Category.OUTDOOR_NATURE,
+    "FOOD": POI.Category.FOOD_DRINK,
+}
 
 
 def _seed_demo_pois_if_empty():
@@ -45,7 +50,7 @@ def _seed_demo_pois_if_empty():
             "address": "Sultanahmet, Istanbul",
             "lat": 41.0086,
             "lon": 28.9802,
-            "category": POI.Category.HISTORICAL,
+            "category": POI.Category.CULTURE_HISTORY,
             "average_rating": 4.8,
             "external_id": "demo-ayasofya",
             "tags": ["tarih", "museum", "istanbul"],
@@ -55,7 +60,7 @@ def _seed_demo_pois_if_empty():
             "address": "Fatih, Istanbul",
             "lat": 41.0115,
             "lon": 28.9833,
-            "category": POI.Category.HISTORICAL,
+            "category": POI.Category.CULTURE_HISTORY,
             "average_rating": 4.7,
             "external_id": "demo-topkapi",
             "tags": ["tarih", "saray", "istanbul"],
@@ -65,7 +70,7 @@ def _seed_demo_pois_if_empty():
             "address": "Beyoglu, Istanbul",
             "lat": 41.0256,
             "lon": 28.9741,
-            "category": POI.Category.HISTORICAL,
+            "category": POI.Category.CULTURE_HISTORY,
             "average_rating": 4.6,
             "external_id": "demo-galata",
             "tags": ["tarih", "tower", "istanbul"],
@@ -75,7 +80,7 @@ def _seed_demo_pois_if_empty():
             "address": "Altindag, Ankara",
             "lat": 39.9391,
             "lon": 32.8538,
-            "category": POI.Category.NATURE,
+            "category": POI.Category.OUTDOOR_NATURE,
             "average_rating": 4.4,
             "external_id": "demo-genclik-parki",
             "tags": ["park", "ankara", "nature"],
@@ -85,7 +90,7 @@ def _seed_demo_pois_if_empty():
             "address": "Cankaya, Ankara",
             "lat": 39.9250,
             "lon": 32.8369,
-            "category": POI.Category.HISTORICAL,
+            "category": POI.Category.CULTURE_HISTORY,
             "average_rating": 4.9,
             "external_id": "demo-anitkabir",
             "tags": ["tarih", "ankara", "anit"],
@@ -95,7 +100,7 @@ def _seed_demo_pois_if_empty():
             "address": "Kavaklidere, Ankara",
             "lat": 39.9086,
             "lon": 32.8597,
-            "category": POI.Category.NATURE,
+            "category": POI.Category.OUTDOOR_NATURE,
             "average_rating": 4.5,
             "external_id": "demo-kugulu-park",
             "tags": ["park", "ankara", "nature"],
@@ -125,7 +130,15 @@ def _run_external_sync(lat: float, lon: float):
             fsq_api_key=getattr(settings, 'FOURSQUARE_API_KEY', None),
         )
         created = sync_service.fetch_and_sync(lat, lon)
-        logger.info("auto-sync completed lat=%s lon=%s created=%s", lat, lon, created)
+        center = Point(lon, lat)
+        recategorized = sync_service.recategorize_pois(GeoService.find_nearby(center, 20000))
+        logger.info(
+            "auto-sync completed lat=%s lon=%s created=%s recategorized=%s",
+            lat,
+            lon,
+            created,
+            recategorized,
+        )
     except Exception:
         logger.exception("auto-sync failed lat=%s lon=%s", lat, lon)
 
@@ -175,6 +188,13 @@ class POIViewSet(viewsets.ModelViewSet):
         if self.action == 'list':
             return POIListSerializer
         return POISerializer
+
+    @staticmethod
+    def _normalize_category_filter(raw_value):
+        value = str(raw_value or "").strip().upper()
+        if not value:
+            return None
+        return _LEGACY_CATEGORY_ALIASES.get(value, value)
 
     @action(detail=False, methods=['get'])
     def cities(self, request):
@@ -420,6 +440,13 @@ class POIViewSet(viewsets.ModelViewSet):
             created_count = 0
 
         center = Point(lon, lat)
+        recategorized_count = 0
+        try:
+            nearby_for_recategorization = GeoService.find_nearby(center, radius)
+            recategorized_count = sync_service.recategorize_pois(nearby_for_recategorization)
+        except Exception:
+            logger.exception("POI recategorization failed city=%s lat=%s lon=%s", city, lat, lon)
+
         filters = {}
         if interests:
             filters['interests'] = interests
@@ -437,6 +464,7 @@ class POIViewSet(viewsets.ModelViewSet):
             'radius': radius,
             'interests': interests,
             'synced_pois_count': created_count,
+            'recategorized_pois_count': recategorized_count,
             'count': pois.count(),
             'results': serializer.data,
         })
@@ -473,7 +501,9 @@ class POIViewSet(viewsets.ModelViewSet):
         # Build filters dict
         filters = {}
         if request.query_params.get('category'):
-            filters['category'] = request.query_params.get('category')
+            normalized_category = self._normalize_category_filter(request.query_params.get('category'))
+            if normalized_category:
+                filters['category'] = normalized_category
         if request.query_params.get('min_rating'):
             filters['min_rating'] = float(request.query_params.get('min_rating'))
         interests = []
@@ -492,11 +522,28 @@ class POIViewSet(viewsets.ModelViewSet):
         if filters.get('interests_only') and pois.count() == 0:
             fallback_filters = {k: v for k, v in filters.items() if k != 'interests_only'}
             pois = GeoService.find_nearby(center, radius, fallback_filters)
+
+        recategorized_count = 0
+        try:
+            sync_service = ExternalSyncService(
+                google_api_key=getattr(settings, 'GOOGLE_PLACES_API_KEY', None),
+                fsq_api_key=getattr(settings, 'FOURSQUARE_API_KEY', None),
+            )
+            recategorized_count = sync_service.recategorize_pois(pois[:200])
+            if recategorized_count > 0:
+                pois = GeoService.find_nearby(center, radius, filters)
+                if filters.get('interests_only') and pois.count() == 0:
+                    fallback_filters = {k: v for k, v in filters.items() if k != 'interests_only'}
+                    pois = GeoService.find_nearby(center, radius, fallback_filters)
+        except Exception:
+            logger.exception("nearby recategorization failed lat=%s lon=%s", lat, lon)
+
         _maybe_trigger_external_sync(lat, lon, pois.count())
         
         serializer = POIListSerializer(pois, many=True)
         return Response({
             'count': pois.count(),
+            'recategorized_pois_count': recategorized_count,
             'results': serializer.data
         })
     

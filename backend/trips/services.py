@@ -12,7 +12,7 @@ from django.contrib.gis.geos import Point
 from django.conf import settings
 
 from locations.models import POI
-from locations.services import ExternalSyncService
+from locations.services import ExternalSyncService, GeoService
 from .models import Itinerary, ItineraryItem
 
 logger = logging.getLogger(__name__)
@@ -189,10 +189,14 @@ class TripGenerationService:
     """Service that creates a city-based itinerary from user interests and duration."""
 
     _INTEREST_TO_CATEGORY = {
-        'HISTORICAL': {'historical', 'history', 'museum', 'monument', 'castle', 'cultural_landmark', 'historical_landmark', 'art_museum'},
-        'NATURE': {'nature', 'park', 'national_park', 'state_park', 'beach', 'lake', 'mountain', 'woods', 'garden', 'botanical_garden', 'hiking_area', 'zoo', 'aquarium'},
-        'FOOD': {'food', 'restaurant', 'cafe', 'bar', 'bakery', 'coffee_shop', 'meal_takeaway', 'meal_delivery', 'ice_cream_shop'},
+        'CULTURE_HISTORY': {'culture', 'historical', 'history', 'museum', 'monument', 'castle', 'cultural_landmark', 'historical_landmark', 'art_museum', 'art_gallery'},
+        'OUTDOOR_NATURE': {'nature', 'outdoor', 'park', 'national_park', 'state_park', 'beach', 'lake', 'mountain', 'woods', 'garden', 'botanical_garden', 'hiking_area', 'zoo', 'aquarium'},
+        'FOOD_DRINK': {'food', 'restaurant', 'cafe', 'bar', 'bakery', 'coffee_shop', 'meal_takeaway', 'meal_delivery', 'ice_cream_shop'},
         'ENTERTAINMENT': {'entertainment', 'movie_theater', 'night_club', 'amusement_park', 'stadium', 'shopping_mall', 'theater', 'performing_arts_theater'},
+        'SHOPPING': {'shopping', 'shopping_mall', 'market', 'book_store', 'clothing_store'},
+        'HEALTH_WELLNESS': {'wellness', 'spa', 'gym', 'wellness_center', 'yoga_studio'},
+        'TRANSPORTATION': {'transportation', 'airport', 'train_station', 'bus_station', 'transit_station', 'subway_station'},
+        'LODGING': {'lodging', 'hotel', 'hostel', 'resort_hotel', 'motel', 'campground'},
     }
 
     @staticmethod
@@ -227,19 +231,47 @@ class TripGenerationService:
             | Q(metadata__district__icontains=city_text)
         )
 
+    @staticmethod
+    def _merge_unique_pois(*poi_lists: List[POI]) -> List[POI]:
+        merged: List[POI] = []
+        seen_ids = set()
+        for poi_list in poi_lists:
+            for poi in poi_list or []:
+                if poi.id in seen_ids:
+                    continue
+                seen_ids.add(poi.id)
+                merged.append(poi)
+        return merged
+
     @classmethod
     def _rank_pois(cls, pois: List[POI], interests: List[str]) -> List[POI]:
         normalized_interests = set(cls._normalize_interests(interests))
         interest_categories = set(cls._map_interests_to_categories(interests))
+        utility_tokens = {
+            'school', 'primary_school', 'secondary_school', 'university',
+            'administrative_area_level_1', 'administrative_area_level_2',
+            'postal_code', 'locality', 'political', 'country', 'city_hall',
+            'airport', 'bus_station', 'train_station', 'subway_station',
+            'transit_station', 'hospital', 'doctor', 'pharmacy', 'police',
+            'fire_station', 'post_office',
+        }
+        utility_name_tokens = {
+            'school', 'university', 'hospital', 'airport', 'station',
+            'municipality', 'province', 'district',
+        }
 
         def score(poi: POI) -> float:
             poi_tags = {str(tag).strip().lower().replace('-', '_').replace(' ', '_') for tag in (poi.tags or [])}
+            poi_name = str(getattr(poi, 'name', '') or '').lower()
             category_match = 1 if poi.category in interest_categories else 0
             tag_overlap = len(normalized_interests.intersection(poi_tags))
             rating_score = float(poi.average_rating or 0.0)
+            utility_penalty = 0.0
+            if poi_tags.intersection(utility_tokens) or any(token in poi_name for token in utility_name_tokens):
+                utility_penalty = 4.0
 
             # Weighted popularity + preference fit
-            return (rating_score * 2.0) + (category_match * 3.0) + (tag_overlap * 1.0)
+            return (rating_score * 2.0) + (category_match * 3.0) + (tag_overlap * 1.0) - utility_penalty
 
         if not interests:
             return sorted(pois, key=lambda p: float(p.average_rating or 0.0), reverse=True)
@@ -316,22 +348,32 @@ class TripGenerationService:
         mapped_class = str(place_class or '').lower()
 
         if mapped_class == 'tourism' or mapped_type in {'museum', 'monument', 'memorial', 'castle', 'ruins'}:
-            return POI.Category.HISTORICAL
+            return POI.Category.CULTURE_HISTORY
         if mapped_class in {'natural', 'leisure'} or mapped_type in {'park', 'garden', 'nature_reserve', 'zoo'}:
-            return POI.Category.NATURE
+            return POI.Category.OUTDOOR_NATURE
         if mapped_class in {'amenity', 'shop'} and mapped_type in {'restaurant', 'cafe', 'bar', 'bakery'}:
-            return POI.Category.FOOD
+            return POI.Category.FOOD_DRINK
+        if mapped_class in {'shop'} or mapped_type in {'shopping_mall', 'market', 'book_store', 'clothing_store'}:
+            return POI.Category.SHOPPING
+        if mapped_type in {'airport', 'train_station', 'bus_station', 'subway_station', 'transit_station'}:
+            return POI.Category.TRANSPORTATION
+        if mapped_type in {'hotel', 'hostel', 'lodging', 'motel', 'resort_hotel', 'campground'}:
+            return POI.Category.LODGING
         return POI.Category.ENTERTAINMENT
 
     @staticmethod
     def _keyword_category(name: str) -> str:
         text = str(name or '').lower()
         if any(token in text for token in ('museum', 'cathedral', 'church', 'palace', 'monument', 'tower', 'historic')):
-            return POI.Category.HISTORICAL
+            return POI.Category.CULTURE_HISTORY
         if any(token in text for token in ('park', 'garden', 'forest', 'beach', 'lake', 'river')):
-            return POI.Category.NATURE
+            return POI.Category.OUTDOOR_NATURE
         if any(token in text for token in ('restaurant', 'cafe', 'bakery', 'bar', 'food', 'market')):
-            return POI.Category.FOOD
+            return POI.Category.FOOD_DRINK
+        if any(token in text for token in ('hotel', 'hostel', 'resort', 'motel')):
+            return POI.Category.LODGING
+        if any(token in text for token in ('airport', 'station', 'terminal')):
+            return POI.Category.TRANSPORTATION
         return POI.Category.ENTERTAINMENT
 
     @staticmethod
@@ -502,12 +544,24 @@ class TripGenerationService:
 
     def _get_city_candidates(self, city: str, min_count: int) -> List[POI]:
         city_query = self._build_city_query(city)
-        candidates = list(POI.objects.filter(city_query).order_by('-average_rating')[:500])
+        text_candidates = list(POI.objects.filter(city_query).order_by('-average_rating')[:500])
+
+        center = self._geocode_city_center(city)
+        geo_candidates: List[POI] = []
+        if center:
+            center_point = Point(center['lon'], center['lat'])
+            # Prefer POIs physically near the city center when city text metadata is sparse.
+            for radius in (12000, 20000, 35000, 50000):
+                nearby = list(GeoService.find_nearby(center_point, radius)[:500])
+                geo_candidates = self._merge_unique_pois(geo_candidates, nearby)
+                if len(geo_candidates) >= min_count:
+                    break
+
+        candidates = self._merge_unique_pois(text_candidates, geo_candidates)
         if len(candidates) >= min_count:
             return candidates
 
         # Preferred generation path: sync external POIs (Google Places pipeline)
-        center = self._geocode_city_center(city)
         if center:
             try:
                 sync_service = ExternalSyncService(
@@ -515,7 +569,15 @@ class TripGenerationService:
                     fsq_api_key=getattr(settings, 'FOURSQUARE_API_KEY', None),
                 )
                 sync_service.fetch_and_sync(center['lat'], center['lon'])
-                candidates = list(POI.objects.filter(city_query).order_by('-average_rating')[:500])
+                text_candidates = list(POI.objects.filter(city_query).order_by('-average_rating')[:500])
+                center_point = Point(center['lon'], center['lat'])
+                geo_candidates = []
+                for radius in (12000, 20000, 35000, 50000):
+                    nearby = list(GeoService.find_nearby(center_point, radius)[:500])
+                    geo_candidates = self._merge_unique_pois(geo_candidates, nearby)
+                    if len(geo_candidates) >= min_count:
+                        break
+                candidates = self._merge_unique_pois(text_candidates, geo_candidates)
             except Exception:
                 logger.exception("External city sync failed city=%s", city)
             if len(candidates) >= min_count:
@@ -523,7 +585,16 @@ class TripGenerationService:
 
         imported_count = self._hydrate_city_pois(city, limit=max(30, min_count * 4))
         if imported_count > 0:
-            candidates = list(POI.objects.filter(city_query).order_by('-average_rating')[:500])
+            text_candidates = list(POI.objects.filter(city_query).order_by('-average_rating')[:500])
+            if center:
+                center_point = Point(center['lon'], center['lat'])
+                geo_candidates = self._merge_unique_pois(
+                    list(GeoService.find_nearby(center_point, 20000)[:500]),
+                    list(GeoService.find_nearby(center_point, 50000)[:500]),
+                )
+                candidates = self._merge_unique_pois(text_candidates, geo_candidates)
+            else:
+                candidates = text_candidates
         return candidates
 
     def generate_itinerary(

@@ -25,17 +25,31 @@ import locationService from '../services/locationService';
 import useAuthStore from '../store/authStore';
 
 const CATEGORY_COLORS = {
-  HISTORICAL: '#e74c3c',
-  NATURE: '#27ae60',
-  FOOD: '#f39c12',
+  CULTURE_HISTORY: '#8e44ad',
+  FOOD_DRINK: '#f39c12',
+  OUTDOOR_NATURE: '#27ae60',
   ENTERTAINMENT: '#9b59b6',
+  SHOPPING: '#3498db',
+  HEALTH_WELLNESS: '#1abc9c',
+  TRANSPORTATION: '#7f8c8d',
+  LODGING: '#16a085',
+  HISTORICAL: '#8e44ad',
+  FOOD: '#f39c12',
+  NATURE: '#27ae60',
 };
 
 const CATEGORY_LABELS_TR = {
-  HISTORICAL: 'Tarihi',
-  NATURE: 'Doğa',
-  FOOD: 'Yemek',
+  CULTURE_HISTORY: 'Kultur ve tarih',
+  FOOD_DRINK: 'Yeme icme',
+  OUTDOOR_NATURE: 'Doga ve acik hava',
   ENTERTAINMENT: 'Eğlence',
+  SHOPPING: 'Alisveris',
+  HEALTH_WELLNESS: 'Saglik ve rahatlama',
+  TRANSPORTATION: 'Ulasim',
+  LODGING: 'Konaklama',
+  HISTORICAL: 'Kultur ve tarih',
+  FOOD: 'Yeme icme',
+  NATURE: 'Doga ve acik hava',
 };
 
 export default function IterinaryBuilderScreen({ route, navigation }) {

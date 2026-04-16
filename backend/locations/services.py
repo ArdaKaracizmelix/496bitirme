@@ -41,10 +41,14 @@ class GeoService:
         Map user interest labels/types to internal POI category enums.
         """
         category_map = {
-            'HISTORICAL': {'historical', 'history', 'museum', 'monument', 'castle', 'cultural_landmark', 'historical_landmark', 'art_museum'},
-            'NATURE': {'nature', 'park', 'national_park', 'state_park', 'beach', 'lake', 'mountain', 'woods', 'garden', 'botanical_garden', 'hiking_area', 'zoo', 'aquarium'},
-            'FOOD': {'food', 'restaurant', 'cafe', 'bar', 'bakery', 'coffee_shop', 'meal_takeaway', 'meal_delivery', 'ice_cream_shop'},
+            'CULTURE_HISTORY': {'culture', 'historical', 'history', 'museum', 'monument', 'castle', 'cultural_landmark', 'historical_landmark', 'art_museum', 'art_gallery'},
+            'OUTDOOR_NATURE': {'nature', 'outdoor', 'park', 'national_park', 'state_park', 'beach', 'lake', 'mountain', 'woods', 'garden', 'botanical_garden', 'hiking_area', 'zoo', 'aquarium'},
+            'FOOD_DRINK': {'food', 'restaurant', 'cafe', 'bar', 'bakery', 'coffee_shop', 'meal_takeaway', 'meal_delivery', 'ice_cream_shop'},
             'ENTERTAINMENT': {'entertainment', 'movie_theater', 'night_club', 'amusement_park', 'stadium', 'shopping_mall', 'theater', 'performing_arts_theater'},
+            'SHOPPING': {'shopping', 'shopping_mall', 'store', 'market', 'book_store', 'clothing_store'},
+            'HEALTH_WELLNESS': {'wellness', 'spa', 'gym', 'wellness_center', 'yoga_studio', 'hospital', 'doctor', 'pharmacy'},
+            'TRANSPORTATION': {'transportation', 'airport', 'train_station', 'bus_station', 'transit_station', 'subway_station'},
+            'LODGING': {'lodging', 'hotel', 'hostel', 'resort_hotel', 'motel', 'campground'},
         }
 
         normalized = set(GeoService.normalize_interest_values(interests))
@@ -292,7 +296,7 @@ class ExternalSyncService:
                     'name': data.name,
                     'address': data.address,
                     'location': Point(data.lon, data.lat),
-                    'category': self.map_category(data.category),
+                    'category': self.map_category(data.category, tags=data.tags, name=data.name),
                     'metadata': data.metadata,
                     'tags': self._normalize_tags(data.tags),
                 }
@@ -333,7 +337,7 @@ class ExternalSyncService:
             print(f"Error refreshing metadata for POI {poi.id}: {str(e)}")
             return False
     
-    def map_category(self, external_cat: str) -> str:
+    def map_category(self, external_cat: str, tags: List[str] = None, name: str = '') -> str:
         """
         Normalizes external category strings to internal Enum values.
         
@@ -344,19 +348,82 @@ class ExternalSyncService:
             Internal POI.Category enum value
         """
 
-        # mapping can be expanded as we integrate more APIs and encounter more category variations
-        mapping = {
-            'historical_place': POI.Category.HISTORICAL,
-            'monument': POI.Category.HISTORICAL,
-            'museum': POI.Category.HISTORICAL,
-            'park': POI.Category.NATURE,
-            'natural_feature': POI.Category.NATURE,
-            'restaurant': POI.Category.FOOD,
-            'cafe': POI.Category.FOOD,
-            'amusement_park': POI.Category.ENTERTAINMENT,
-            'movie_theater': POI.Category.ENTERTAINMENT,
+        normalized_external = str(external_cat or '').strip().lower().replace('-', '_').replace(' ', '_')
+        normalized_tags = self._normalize_tags(tags or [])
+        name_tokens = self._normalize_tags(str(name or '').split())
+        signals = set([normalized_external, *normalized_tags, *name_tokens])
+
+        historical_tokens = {
+            'historical_place', 'historical_landmark', 'history_museum', 'museum',
+            'art_gallery', 'art_museum', 'monument', 'memorial', 'castle',
+            'ruins', 'tourist_attraction', 'cathedral', 'church', 'mosque',
+            'synagogue', 'temple',
         }
-        return mapping.get(external_cat.lower(), POI.Category.ENTERTAINMENT)
+        culture_tokens = {
+            'school', 'primary_school', 'secondary_school', 'university',
+            'educational_institution', 'academic_department', 'library',
+            'research_institute',
+        }
+        nature_tokens = {
+            'park', 'city_park', 'state_park', 'national_park', 'nature_reserve',
+            'garden', 'botanical_garden', 'forest', 'woods', 'beach', 'lake',
+            'river', 'mountain', 'mountain_peak', 'hiking_area', 'zoo', 'aquarium',
+        }
+        food_tokens = {
+            'restaurant', 'cafe', 'coffee_shop', 'bakery', 'bar', 'pub',
+            'food', 'food_court', 'meal_takeaway', 'meal_delivery', 'ice_cream_shop',
+            'kebab_shop', 'diner',
+        }
+        shopping_tokens = {
+            'shopping_mall', 'store', 'market', 'book_store', 'clothing_store', 'mall',
+        }
+        health_tokens = {
+            'spa', 'gym', 'wellness_center', 'yoga_studio', 'hospital', 'doctor', 'pharmacy',
+            'medical_center', 'medical_clinic',
+        }
+        transportation_tokens = {
+            'airport', 'train_station', 'bus_station', 'transit_station', 'subway_station',
+            'taxi_stand', 'transportation',
+        }
+        lodging_tokens = {
+            'lodging', 'hotel', 'hostel', 'resort_hotel', 'motel', 'campground', 'guest_house',
+        }
+
+        if signals.intersection(food_tokens):
+            return POI.Category.FOOD_DRINK
+        if signals.intersection(historical_tokens):
+            return POI.Category.CULTURE_HISTORY
+        if signals.intersection(culture_tokens):
+            return POI.Category.CULTURE_HISTORY
+        if signals.intersection(nature_tokens):
+            return POI.Category.OUTDOOR_NATURE
+        if signals.intersection(shopping_tokens):
+            return POI.Category.SHOPPING
+        if signals.intersection(health_tokens):
+            return POI.Category.HEALTH_WELLNESS
+        if signals.intersection(transportation_tokens):
+            return POI.Category.TRANSPORTATION
+        if signals.intersection(lodging_tokens):
+            return POI.Category.LODGING
+        return POI.Category.ENTERTAINMENT
+
+    def recategorize_pois(self, pois: QuerySet) -> int:
+        """
+        Recompute categories from tags/name for an existing POI queryset.
+        Returns number of changed rows.
+        """
+        updated = 0
+        for poi in pois:
+            next_category = self.map_category(
+                poi.category,
+                tags=poi.tags if isinstance(poi.tags, list) else [],
+                name=poi.name,
+            )
+            if poi.category != next_category:
+                poi.category = next_category
+                poi.save(update_fields=['category', 'updated_at'])
+                updated += 1
+        return updated
 
     def _normalize_tags(self, tags: List[str]) -> List[str]:
         normalized = []

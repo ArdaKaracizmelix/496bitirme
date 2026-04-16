@@ -213,14 +213,26 @@ export const calculateRegionToFitMarkers = (pois) => {
  * @returns {string} - Color hex code
  */
 export const getCategoryColor = (category) => {
+  const normalizeCategory = (value) => {
+    const aliases = {
+      HISTORICAL: 'CULTURE_HISTORY',
+      FOOD: 'FOOD_DRINK',
+      NATURE: 'OUTDOOR_NATURE',
+    };
+    return aliases[value] || value;
+  };
+
   const categoryColors = {
-    HISTORICAL: '#e74c3c',
-    NATURE: '#27ae60',
-    FOOD: '#f39c12',
+    CULTURE_HISTORY: '#8e44ad',
+    FOOD_DRINK: '#f39c12',
+    OUTDOOR_NATURE: '#27ae60',
     ENTERTAINMENT: '#9b59b6',
     SHOPPING: '#3498db',
+    HEALTH_WELLNESS: '#1abc9c',
+    TRANSPORTATION: '#7f8c8d',
+    LODGING: '#16a085',
   };
-  return categoryColors[category] || '#95a5a6';
+  return categoryColors[normalizeCategory(category)] || '#95a5a6';
 };
 
 /**
@@ -229,14 +241,27 @@ export const getCategoryColor = (category) => {
  * @returns {string} - Display name
  */
 export const getCategoryName = (category) => {
+  const normalizeCategory = (value) => {
+    const aliases = {
+      HISTORICAL: 'CULTURE_HISTORY',
+      FOOD: 'FOOD_DRINK',
+      NATURE: 'OUTDOOR_NATURE',
+    };
+    return aliases[value] || value;
+  };
+
   const categoryNames = {
-    HISTORICAL: 'Tarihi',
-    NATURE: 'Doğa',
-    FOOD: 'Yemek',
+    CULTURE_HISTORY: 'Kultur ve tarih',
+    FOOD_DRINK: 'Yeme icme',
+    OUTDOOR_NATURE: 'Doga ve acik hava',
     ENTERTAINMENT: 'Eğlence',
     SHOPPING: 'Alışveriş',
+    HEALTH_WELLNESS: 'Saglik ve rahatlama',
+    TRANSPORTATION: 'Ulasim',
+    LODGING: 'Konaklama',
   };
-  return categoryNames[category] || category;
+  const normalized = normalizeCategory(category);
+  return categoryNames[normalized] || normalized;
 };
 
 export default {

@@ -15,11 +15,14 @@ import { useMapController } from '../../hooks/useMapController';
 import { getCategoryColor, getCategoryName, formatDistance, calculateDistance } from '../../utils/mapUtils';
 
 const CATEGORIES = [
-  { id: 'HISTORICAL', label: 'Tarihi' },
-  { id: 'NATURE', label: 'Doga' },
-  { id: 'FOOD', label: 'Yemek' },
+  { id: 'CULTURE_HISTORY', label: 'Kultur & tarih' },
+  { id: 'FOOD_DRINK', label: 'Yeme icme' },
+  { id: 'OUTDOOR_NATURE', label: 'Doga & acik hava' },
   { id: 'ENTERTAINMENT', label: 'Eglence' },
   { id: 'SHOPPING', label: 'Alisveris' },
+  { id: 'HEALTH_WELLNESS', label: 'Saglik & rahatlama' },
+  { id: 'TRANSPORTATION', label: 'Ulasim' },
+  { id: 'LODGING', label: 'Konaklama' },
 ];
 
 const escapeHtml = (value = '') =>

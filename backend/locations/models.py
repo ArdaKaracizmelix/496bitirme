@@ -17,10 +17,14 @@ class POI(models.Model):
         # there will be more categories added in the future, fetching from external sources(APIs).
 
         """Enumeration for POI categories"""
-        HISTORICAL = 'HISTORICAL', 'Historical'
-        NATURE = 'NATURE', 'Nature'
-        FOOD = 'FOOD', 'Food'
+        CULTURE_HISTORY = 'CULTURE_HISTORY', 'Culture & History'
+        FOOD_DRINK = 'FOOD_DRINK', 'Food & Drink'
+        OUTDOOR_NATURE = 'OUTDOOR_NATURE', 'Outdoor & Nature'
         ENTERTAINMENT = 'ENTERTAINMENT', 'Entertainment'
+        SHOPPING = 'SHOPPING', 'Shopping'
+        HEALTH_WELLNESS = 'HEALTH_WELLNESS', 'Health & Wellness'
+        TRANSPORTATION = 'TRANSPORTATION', 'Transportation'
+        LODGING = 'LODGING', 'Lodging'
     
     # Primary Key
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -39,7 +43,10 @@ class POI(models.Model):
     category = models.CharField(
         max_length=20,
         choices=Category.choices,
-        help_text="Classification: HISTORICAL, NATURE, FOOD, ENTERTAINMENT etc."
+        help_text=(
+            "Classification: CULTURE_HISTORY, FOOD_DRINK, OUTDOOR_NATURE, "
+            "ENTERTAINMENT, SHOPPING, HEALTH_WELLNESS, TRANSPORTATION, LODGING"
+        ),
     )
     
     # Rating & Quality
@@ -162,4 +169,3 @@ class SavedPOI(models.Model):
     
     def __str__(self):
         return f"{self.user.user.username} saved {self.poi.name}"
-
