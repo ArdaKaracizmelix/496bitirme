@@ -132,6 +132,8 @@ class SocialPostViewSet(viewsets.ViewSet):
                     post.location = serializer.validated_data['location']
                 if 'tags' in serializer.validated_data:
                     post.tags = serializer.validated_data['tags']
+                if 'route_data' in serializer.validated_data:
+                    post.route_data = serializer.validated_data['route_data'] or {}
                 if 'visibility' in serializer.validated_data:
                     post.visibility = serializer.validated_data['visibility']
                 
@@ -366,11 +368,7 @@ class SocialPostViewSet(viewsets.ViewSet):
                 'total_count': len(post.comments),
                 'count': len(comments),
                 'results': [
-                    {
-                        'user_id': str(c.user_id),
-                        'text': c.text,
-                        'timestamp': c.timestamp.isoformat()
-                    } for c in comments
+                    self.service._comment_to_dto(c) for c in comments
                 ]
             })
         except Exception as e:

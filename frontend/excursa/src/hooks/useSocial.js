@@ -89,6 +89,68 @@ export const useUserProfile = (userId, isOwnProfile = false) => {
   });
 };
 
+export const useFollowUser = () => {
+  const queryClient = useQueryClient();
+  const updateUser = useAuthStore((state) => state.updateUser);
+
+  return useMutation({
+    mutationFn: (userId) => SocialService.followUser(userId),
+    onSuccess: (response, userId) => {
+      if (typeof response?.following_count === 'number') {
+        updateUser({ following_count: response.following_count });
+      }
+      queryClient.setQueryData(['userProfile', userId], (existing) =>
+        existing
+          ? {
+              ...existing,
+              is_following: true,
+              followers_count: response?.followers_count ?? existing.followers_count,
+            }
+          : existing
+      );
+      queryClient.setQueryData(['userProfile', 'me'], (existing) => {
+        if (!existing) return existing;
+        const nextFollowing = response?.following_count ?? existing.following_count;
+        return {
+          ...existing,
+          following_count: nextFollowing,
+        };
+      });
+    },
+  });
+};
+
+export const useUnfollowUser = () => {
+  const queryClient = useQueryClient();
+  const updateUser = useAuthStore((state) => state.updateUser);
+
+  return useMutation({
+    mutationFn: (userId) => SocialService.unfollowUser(userId),
+    onSuccess: (response, userId) => {
+      if (typeof response?.following_count === 'number') {
+        updateUser({ following_count: response.following_count });
+      }
+      queryClient.setQueryData(['userProfile', userId], (existing) =>
+        existing
+          ? {
+              ...existing,
+              is_following: false,
+              followers_count: response?.followers_count ?? existing.followers_count,
+            }
+          : existing
+      );
+      queryClient.setQueryData(['userProfile', 'me'], (existing) => {
+        if (!existing) return existing;
+        const nextFollowing = response?.following_count ?? existing.following_count;
+        return {
+          ...existing,
+          following_count: nextFollowing,
+        };
+      });
+    },
+  });
+};
+
 /**
  * Hook: Fetch posts from specific user (for profile)
  */

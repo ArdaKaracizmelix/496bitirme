@@ -10,6 +10,8 @@ import uuid
 class EmbeddedCommentSerializer(serializers.Serializer):
     """Serializer for embedded comment objects."""
     user_id = serializers.UUIDField()
+    user_name = serializers.CharField(required=False, allow_blank=True)
+    avatar_url = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     text = serializers.CharField(max_length=500)
     timestamp = serializers.DateTimeField(read_only=True)
 
@@ -21,6 +23,8 @@ class PostDTO(serializers.Serializer):
     """
     id = serializers.CharField(read_only=True)
     user_ref_id = serializers.UUIDField()
+    user_name = serializers.CharField(read_only=True)
+    avatar_url = serializers.CharField(read_only=True, allow_null=True, allow_blank=True)
     content = serializers.CharField(max_length=5000)
     media_urls = serializers.ListField(
         child=serializers.URLField(),
@@ -36,12 +40,14 @@ class PostDTO(serializers.Serializer):
         required=False,
         default=list
     )
+    route_data = serializers.JSONField(required=False, default=dict)
     created_at = serializers.DateTimeField(read_only=True)
     visibility = serializers.ChoiceField(
         choices=['PUBLIC', 'FOLLOWERS', 'PRIVATE'],
         default='PUBLIC'
     )
     virality_score = serializers.FloatField(read_only=True)
+    liked = serializers.BooleanField(read_only=True)
 
 
 class SocialPostCreateSerializer(serializers.Serializer):
@@ -58,6 +64,7 @@ class SocialPostCreateSerializer(serializers.Serializer):
         required=False,
         default=list
     )
+    route_data = serializers.JSONField(required=False, default=dict)
     visibility = serializers.ChoiceField(
         choices=['PUBLIC', 'FOLLOWERS', 'PRIVATE'],
         default='PUBLIC'
@@ -66,10 +73,11 @@ class SocialPostCreateSerializer(serializers.Serializer):
     def validate(self, attrs):
         content = (attrs.get('content') or '').strip()
         media_urls = attrs.get('media_urls', [])
+        route_data = attrs.get('route_data') or {}
 
-        if not content and not media_urls:
+        if not content and not media_urls and not route_data:
             raise serializers.ValidationError(
-                'At least one of content or media_urls must be provided.'
+                'At least one of content, media_urls or route_data must be provided.'
             )
         return attrs
     
@@ -80,6 +88,7 @@ class SocialPostCreateSerializer(serializers.Serializer):
             media_urls=validated_data.get('media_urls', []),
             location=validated_data.get('location'),
             tags=validated_data.get('tags', []),
+            route_data=validated_data.get('route_data') or {},
             visibility=validated_data['visibility'],
             user_ref_id=self.context['user_id']  # From request context
         )
@@ -99,6 +108,7 @@ class SocialPostUpdateSerializer(serializers.Serializer):
         child=serializers.CharField(),
         required=False
     )
+    route_data = serializers.JSONField(required=False)
     visibility = serializers.ChoiceField(
         choices=['PUBLIC', 'FOLLOWERS', 'PRIVATE'],
         required=False

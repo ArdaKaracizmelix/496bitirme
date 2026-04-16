@@ -1,4 +1,5 @@
 import React from 'react';
+import { Platform, Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -185,10 +186,63 @@ function SocialStack() {
 function MainTabs() {
   return (
     <Tab.Navigator
-      screenOptions={{
+      initialRouteName="Social"
+      screenOptions={({ route }) => ({
         headerShown: false,
-      }}
+        tabBarShowLabel: true,
+        tabBarActiveTintColor: '#1a1a2e',
+        tabBarInactiveTintColor: '#8f887d',
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '800',
+          marginTop: 2,
+        },
+        tabBarStyle: {
+          height: Platform.OS === 'ios' ? 86 : 72,
+          paddingTop: 8,
+          paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+          paddingHorizontal: 10,
+          borderTopWidth: 0,
+          backgroundColor: '#fffdf8',
+          shadowColor: '#1a1a2e',
+          shadowOffset: { width: 0, height: -6 },
+          shadowOpacity: 0.08,
+          shadowRadius: 18,
+          elevation: 12,
+        },
+        tabBarItemStyle: {
+          borderRadius: 18,
+        },
+        tabBarIcon: ({ focused, color }) => {
+          const icons = {
+            Social: focused ? '●' : '○',
+            Home: '⌖',
+            Trips: '◇',
+            Chatbot: '✦',
+            Profile: '◉',
+          };
+          return (
+            <Text
+              style={{
+                color,
+                fontSize: focused ? 22 : 20,
+                fontWeight: '900',
+                lineHeight: 24,
+              }}
+            >
+              {icons[route.name] || '•'}
+            </Text>
+          );
+        },
+      })}
     >
+      <Tab.Screen 
+        name="Social" 
+        component={SocialStack}
+        options={{
+          tabBarLabel: 'Akis',
+        }}
+      />
       <Tab.Screen 
         name="Home" 
         component={MapStack}
@@ -197,24 +251,17 @@ function MainTabs() {
         }}
       />
       <Tab.Screen 
-        name="Social" 
-        component={SocialStack}
-        options={{
-          tabBarLabel: 'Sosyal',
-        }}
-      />
-      <Tab.Screen 
         name="Trips" 
         component={TripsStack}
         options={{
-          tabBarLabel: 'Rota',
+          tabBarLabel: 'Rotalar',
         }}
       />
       <Tab.Screen 
         name="Chatbot" 
         component={ChatbotPage}
         options={{
-          tabBarLabel: 'Chatbot',
+          tabBarLabel: 'Asistan',
         }}
       />
       <Tab.Screen 

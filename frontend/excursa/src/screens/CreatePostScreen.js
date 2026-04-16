@@ -12,57 +12,316 @@ import {
   Modal,
   FlatList,
   Platform,
+  KeyboardAvoidingView,
+  useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { useCreatePost } from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
 import SocialService from '../services/SocialService';
 import TripService from '../services/TripService';
+import RouteShareCard from '../components/RouteShareCard';
+import { buildRouteShareData } from '../utils/routeShareUtils';
 
-/**
- * CreatePostScreen Component
- * Allows users to compose a new social post with media, location, and visibility settings
- */
+const C = {
+  ink: '#1a1a2e',
+  text: '#2d3142',
+  muted: '#7b8190',
+  subtle: '#a2a8b5',
+  line: '#e9edf3',
+  panel: '#ffffff',
+  page: '#f6f7fb',
+  soft: '#f0f3f8',
+  brandSoft: '#eef1f8',
+  danger: '#d64545',
+  success: '#188f62',
+};
+
+const MAX_MEDIA = 6;
+const CAPTION_LIMIT = 5000;
+const QUICK_LOCATIONS = ['Istanbul', 'Kapadokya', 'Izmir', 'Antalya', 'Bodrum'];
+const VISIBILITY = [
+  { label: 'Herkese Acik', value: 'PUBLIC', icon: 'W', hint: 'Topluluk akisinda gorunur.' },
+  { label: 'Takipciler', value: 'FOLLOWERS', icon: 'F', hint: 'Sadece seni takip edenler gorur.' },
+  { label: 'Ozel', value: 'PRIVATE', icon: 'P', hint: 'Profilinde gizli kalir.' },
+];
+
+const normalizeTags = (value) =>
+  value.split(',').map((tag) => tag.trim().replace(/^#/, '')).filter(Boolean);
+
+const errorMessage = (error) =>
+  error?.response?.data?.detail ||
+  error?.response?.data?.error ||
+  error?.message ||
+  'Gonderi olusturulurken bir hata olustu.';
+
+function Header({ canSubmit, submitting, onBack, onSubmit }) {
+  return (
+    <View style={styles.header}>
+      <TouchableOpacity style={styles.headerGhost} onPress={onBack} disabled={submitting}>
+        <Text style={styles.headerGhostText}>Iptal</Text>
+      </TouchableOpacity>
+      <View style={styles.headerCenter}>
+        <Text style={styles.headerTitle}>Yeni Gonderi</Text>
+        <Text style={styles.headerSubtitle}>Anini toplulukla paylas</Text>
+      </View>
+      <TouchableOpacity
+        style={[styles.headerShare, (!canSubmit || submitting) && styles.disabled]}
+        onPress={onSubmit}
+        disabled={!canSubmit || submitting}
+      >
+        {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.headerShareText}>Paylas</Text>}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function Author({ user, visibility, onPress }) {
+  const active = VISIBILITY.find((item) => item.value === visibility);
+  const name = user?.full_name || user?.username || user?.email || 'Gezgin';
+  const avatar = user?.avatar_url || 'https://i.pravatar.cc/150?img=12';
+
+  return (
+    <View style={styles.author}>
+      <Image source={{ uri: avatar }} style={styles.avatar} />
+      <View style={styles.authorCopy}>
+        <Text style={styles.authorName} numberOfLines={1}>{name}</Text>
+        <TouchableOpacity style={styles.visibilityMini} onPress={onPress}>
+          <Text style={styles.visibilityMiniText}>{active?.label || 'Gorunurluk'}</Text>
+          <Text style={styles.chevron}>v</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function CaptionCard({ caption, error, onChange }) {
+  const countColor = CAPTION_LIMIT - caption.length < 120 ? C.danger : C.subtle;
+  return (
+    <View style={styles.card}>
+      <Text style={styles.eyebrow}>Paylasim metni</Text>
+      <TextInput
+        style={styles.captionInput}
+        placeholder="Bugun nerede, ne kesfettin?"
+        placeholderTextColor="#9aa1ad"
+        multiline
+        value={caption}
+        onChangeText={onChange}
+        maxLength={CAPTION_LIMIT}
+        textAlignVertical="top"
+      />
+      <View style={styles.metaRow}>
+        <Text style={[styles.inlineError, !error && styles.hidden]}>{error || ' '}</Text>
+        <Text style={[styles.count, { color: countColor }]}>{caption.length}/{CAPTION_LIMIT}</Text>
+      </View>
+    </View>
+  );
+}
+
+function MediaCard({ media, tileSize, progress, onPick, onCamera, onRemove }) {
+  const remaining = MAX_MEDIA - media.length;
+  return (
+    <View style={styles.card}>
+      <View style={styles.sectionTop}>
+        <View>
+          <Text style={styles.eyebrow}>Medya</Text>
+          <Text style={styles.sectionTitle}>{media.length ? `${media.length}/${MAX_MEDIA} secildi` : 'Fotograf ekle'}</Text>
+        </View>
+        {media.length > 0 && remaining > 0 && (
+          <TouchableOpacity style={styles.compactAction} onPress={onPick}>
+            <Text style={styles.compactActionText}>Ekle</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {media.length === 0 ? (
+        <TouchableOpacity style={styles.dropzone} onPress={onPick}>
+          <View style={styles.dropIcon}><Text style={styles.dropIconText}>+</Text></View>
+          <Text style={styles.dropTitle}>Galeriden fotograf sec</Text>
+          <Text style={styles.dropText}>Paylasimini guclendirmek icin en fazla {MAX_MEDIA} gorsel ekleyebilirsin.</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.mediaGrid}>
+          {media.map((item, index) => (
+            <View key={`${item.uri}-${index}`} style={[styles.mediaTile, { width: tileSize, height: tileSize }]}>
+              <Image source={{ uri: item.uri }} style={styles.mediaPreview} resizeMode="cover" />
+              <View style={styles.mediaBadge}><Text style={styles.mediaBadgeText}>{index + 1}</Text></View>
+              <TouchableOpacity style={styles.removeMedia} onPress={() => onRemove(index)}>
+                <Text style={styles.removeMediaText}>x</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      )}
+
+      <View style={styles.actionRow}>
+        <TouchableOpacity style={[styles.secondaryAction, remaining <= 0 && styles.disabled]} onPress={onPick} disabled={remaining <= 0}>
+          <Text style={styles.secondaryIcon}>IMG</Text>
+          <Text style={styles.secondaryText}>Galeri</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.secondaryAction, remaining <= 0 && styles.disabled]} onPress={onCamera} disabled={remaining <= 0}>
+          <Text style={styles.secondaryIcon}>CAM</Text>
+          <Text style={styles.secondaryText}>Kamera</Text>
+        </TouchableOpacity>
+      </View>
+
+      {!!progress.total && (
+        <View style={styles.uploadPanel}>
+          <View style={styles.uploadRow}>
+            <Text style={styles.uploadTitle}>Medya yukleniyor</Text>
+            <Text style={styles.uploadCount}>{progress.current}/{progress.total}</Text>
+          </View>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${Math.max(6, progress.percent)}%` }]} />
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function DetailsCard({
+  location,
+  trip,
+  routePreview,
+  tagsText,
+  onLocation,
+  onClearLocation,
+  onTrip,
+  onClearTrip,
+  onTags,
+}) {
+  return (
+    <View style={styles.card}>
+      <Text style={styles.eyebrow}>Detaylar</Text>
+      <TouchableOpacity style={styles.detailRow} onPress={onLocation}>
+        <View style={styles.detailIcon}><Text style={styles.detailIconText}>LOC</Text></View>
+        <View style={styles.detailCopy}>
+          <Text style={styles.detailTitle}>{location ? location.name : 'Yer etiketle'}</Text>
+          <Text style={styles.detailText}>{location ? 'Konum gonderiye eklendi.' : 'Sehir, mekan veya rota noktasi ekle.'}</Text>
+        </View>
+        {location && <TouchableOpacity style={styles.clearPill} onPress={onClearLocation}><Text style={styles.clearText}>Kaldir</Text></TouchableOpacity>}
+      </TouchableOpacity>
+      <View style={styles.divider} />
+      <TouchableOpacity style={styles.detailRow} onPress={onTrip}>
+        <View style={styles.detailIcon}><Text style={styles.detailIconText}>MAP</Text></View>
+        <View style={styles.detailCopy}>
+          <Text style={styles.detailTitle} numberOfLines={1}>{trip ? trip.title : 'Rota paylas'}</Text>
+          <Text style={styles.detailText}>{trip ? routePreview?.summary || 'Rota detaylari eklendi.' : 'Kayitli rotalarindan birini gonderiye bagla.'}</Text>
+        </View>
+        {trip && <TouchableOpacity style={styles.clearPill} onPress={onClearTrip}><Text style={styles.clearText}>Kaldir</Text></TouchableOpacity>}
+      </TouchableOpacity>
+      {routePreview ? <RouteShareCard routeData={routePreview} compact /> : null}
+      <TextInput
+        style={styles.tagsInput}
+        placeholder="Etiketler: kahve, galata, gunbatimi"
+        placeholderTextColor="#9aa1ad"
+        value={tagsText}
+        onChangeText={onTags}
+      />
+    </View>
+  );
+}
+
+function VisibilityCard({ value, onSelect }) {
+  const active = VISIBILITY.find((item) => item.value === value);
+  return (
+    <View style={styles.card}>
+      <Text style={styles.eyebrow}>Gorunurluk</Text>
+      <View style={styles.visibilityChips}>
+        {VISIBILITY.map((item) => {
+          const selected = item.value === value;
+          return (
+            <TouchableOpacity
+              key={item.value}
+              style={[styles.visibilityChip, selected && styles.visibilityChipSelected]}
+              onPress={() => onSelect(item.value)}
+            >
+              <Text style={[styles.visibilityIcon, selected && styles.visibilityIconSelected]}>{item.icon}</Text>
+              <Text style={[styles.visibilityLabel, selected && styles.visibilityLabelSelected]}>{item.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <Text style={styles.visibilityHint}>{active?.hint}</Text>
+    </View>
+  );
+}
+
+function BottomBar({ bottom, canSubmit, submitting, error, onSubmit }) {
+  return (
+    <View style={[styles.bottomBar, { paddingBottom: Math.max(bottom, 12) }]}>
+      <View style={styles.bottomCopy}>
+        <Text style={styles.bottomTitle}>{error ? 'Paylasima hazir degil' : 'Paylasima hazir'}</Text>
+        <Text style={styles.bottomText} numberOfLines={1}>{error || 'Topluluga temiz ve akici bir gonderi olarak gidecek.'}</Text>
+      </View>
+      <TouchableOpacity
+        style={[styles.primaryCta, (!canSubmit || submitting) && styles.disabled]}
+        onPress={onSubmit}
+        disabled={!canSubmit || submitting}
+      >
+        {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primaryCtaText}>Paylas</Text>}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function CreatePostScreen({ route }) {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const { user } = useAuthStore();
   const createPostMutation = useCreatePost();
   const openTripPicker = !!route?.params?.openTripPicker;
 
-  // Form state
   const [caption, setCaption] = useState('');
   const [selectedMedia, setSelectedMedia] = useState([]);
   const [taggedLocation, setTaggedLocation] = useState(null);
   const [visibility, setVisibility] = useState('PUBLIC');
-  const [tags, setTags] = useState([]);
+  const [tagsText, setTagsText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [showVisibilityOptions, setShowVisibilityOptions] = useState(false);
-  const [showLocationSearch, setShowLocationSearch] = useState(false);
+  const [showVisibility, setShowVisibility] = useState(false);
+  const [showLocation, setShowLocation] = useState(false);
   const [locationSearch, setLocationSearch] = useState('');
   const [showTripPicker, setShowTripPicker] = useState(false);
   const [availableTrips, setAvailableTrips] = useState([]);
   const [isLoadingTrips, setIsLoadingTrips] = useState(false);
   const [selectedTrip, setSelectedTrip] = useState(null);
+  const [formError, setFormError] = useState('');
+  const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, percent: 0 });
 
-  const visibilityOptions = [
-    { label: 'Herkese Açık', value: 'PUBLIC', icon: '🌍' },
-    { label: 'Sadece Takipçiler', value: 'FOLLOWERS', icon: '👥' },
-    { label: 'Özel', value: 'PRIVATE', icon: '🔒' },
-  ];
+  const submitting = isLoading || createPostMutation.isPending;
+  const tags = useMemo(() => normalizeTags(tagsText), [tagsText]);
+  const tripStops = useMemo(() => selectedTrip?.stops?.length ?? selectedTrip?.total_stops ?? 0, [selectedTrip]);
+  const routePreview = useMemo(
+    () =>
+      selectedTrip
+        ? buildRouteShareData(
+            selectedTrip,
+            null,
+            user?.full_name || user?.username || user?.email || null
+          )
+        : null,
+    [selectedTrip, user]
+  );
+  const hasContent = !!caption.trim() || selectedMedia.length > 0 || !!selectedTrip;
+  const captionError = caption.length >= CAPTION_LIMIT ? 'Maksimum karakter sinirina ulastin.' : '';
+  const validationError = !hasContent ? 'En az bir metin, medya veya rota ekle.' : captionError;
+  const canSubmit = !validationError && !submitting;
+  const contentWidth = Math.min(width - 32, 760);
+  const tileSize = Math.max(132, Math.floor((contentWidth - 48) / (width >= 700 ? 3 : 2)));
 
   const fetchTrips = async () => {
     setIsLoadingTrips(true);
     try {
-      const tripPayload = await TripService.fetchTrips();
-      const trips = Array.isArray(tripPayload?.results) ? tripPayload.results : (tripPayload || []);
-      const currentUsername = user?.username;
-      const ownTrips = currentUsername
-        ? trips.filter((trip) => trip?.username === currentUsername)
-        : trips;
+      const payload = await TripService.fetchTrips();
+      const trips = Array.isArray(payload?.results) ? payload.results : payload || [];
+      const ownTrips = user?.username ? trips.filter((trip) => trip?.username === user.username) : trips;
       setAvailableTrips(ownTrips);
     } catch (error) {
-      Alert.alert('Hata', 'Rotalar yüklenemedi');
+      Alert.alert('Hata', 'Rotalar yuklenemedi.');
     } finally {
       setIsLoadingTrips(false);
     }
@@ -75,25 +334,15 @@ export default function CreatePostScreen({ route }) {
     }
   }, [openTripPicker]);
 
-  const selectedTripStopCount = useMemo(
-    () => selectedTrip?.stops?.length ?? selectedTrip?.total_stops ?? 0,
-    [selectedTrip]
-  );
-
-  const showImagePickerUnavailable = () => {
-    Alert.alert('Hata', 'Medya seçimi şu an kullanılamıyor.');
-  };
-
-  const MAX_MEDIA_COUNT = 6;
-
-  const appendMediaAssets = (assets = []) => {
+  const appendMedia = (assets = []) => {
     if (!assets.length) return;
+    setFormError('');
     setSelectedMedia((prev) => {
       const next = [...prev, ...assets];
-      if (next.length > MAX_MEDIA_COUNT) {
-        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA_COUNT} fotoğraf ekleyebilirsiniz.`);
+      if (next.length > MAX_MEDIA) {
+        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA} fotograf ekleyebilirsiniz.`);
       }
-      return next.slice(0, MAX_MEDIA_COUNT);
+      return next.slice(0, MAX_MEDIA);
     });
   };
 
@@ -103,160 +352,98 @@ export default function CreatePostScreen({ route }) {
         reject(new Error('Web document is not available'));
         return;
       }
-
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/*';
       input.capture = 'environment';
       input.style.position = 'fixed';
       input.style.left = '-9999px';
-      input.style.width = '1px';
-      input.style.height = '1px';
       input.style.opacity = '0';
-
       input.onchange = () => {
         try {
           const file = input.files && input.files[0];
-          if (!file) {
-            resolve(null);
-            return;
-          }
-
-          const objectUrl = URL.createObjectURL(file);
-          resolve({
-            uri: objectUrl,
+          resolve(file ? {
+            uri: URL.createObjectURL(file),
             file,
             fileName: file.name || `camera-${Date.now()}.jpg`,
             mimeType: file.type || 'image/jpeg',
             type: 'image',
-          });
+          } : null);
         } catch (err) {
           reject(err);
         } finally {
           input.remove();
         }
       };
-
       input.onerror = (err) => {
         input.remove();
         reject(err);
       };
-
       document.body.appendChild(input);
       input.click();
     });
 
-  /**
-   * Handle media selection from device gallery
-   */
   const handlePickMedia = async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('İzin Gerekli', 'Galeriye erişim izni vermelisiniz.');
+        Alert.alert('Izin Gerekli', 'Galeriye erisim izni vermelisiniz.');
         return;
       }
-
-      const remainingSlots = MAX_MEDIA_COUNT - selectedMedia.length;
-      if (remainingSlots <= 0) {
-        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA_COUNT} fotoğraf ekleyebilirsiniz.`);
+      const remaining = MAX_MEDIA - selectedMedia.length;
+      if (remaining <= 0) {
+        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA} fotograf ekleyebilirsiniz.`);
         return;
       }
-
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
         allowsMultipleSelection: true,
-        selectionLimit: remainingSlots,
+        selectionLimit: remaining,
         quality: 0.85,
+        exif: true,
       });
-
-      if (result.canceled || !result.assets?.length) {
-        return;
-      }
-
-      appendMediaAssets(result.assets);
+      if (!result.canceled && result.assets?.length) appendMedia(result.assets);
     } catch (error) {
       console.error('Error picking media:', error);
-      showImagePickerUnavailable();
+      Alert.alert('Hata', 'Medya secimi su an kullanilamiyor.');
     }
   };
 
-  /**
-   * Handle capturing photo with camera
-   */
   const handleTakePhoto = async () => {
     try {
       if (Platform.OS === 'web') {
         const captured = await captureImageFromWeb();
-        if (captured) {
-          appendMediaAssets([captured]);
-        } else {
-          Alert.alert('Bilgi', 'Tarayıcı kamera açmadı. Lütfen Galeri seçeneğini kullanın.');
-        }
+        if (captured) appendMedia([captured]);
+        else Alert.alert('Bilgi', 'Tarayici kamera acmadi. Lutfen galeri secenegini kullanin.');
         return;
       }
-
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('İzin Gerekli', 'Kamera izni vermelisiniz.');
+        Alert.alert('Izin Gerekli', 'Kamera izni vermelisiniz.');
         return;
       }
-
-      if (selectedMedia.length >= MAX_MEDIA_COUNT) {
-        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA_COUNT} fotoğraf ekleyebilirsiniz.`);
+      if (selectedMedia.length >= MAX_MEDIA) {
+        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA} fotograf ekleyebilirsiniz.`);
         return;
       }
-
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         quality: 0.85,
+        exif: true,
       });
-
-      if (result.canceled || !result.assets?.length) {
-        return;
-      }
-
-      appendMediaAssets(result.assets.slice(0, 1));
+      if (!result.canceled && result.assets?.length) appendMedia(result.assets.slice(0, 1));
     } catch (error) {
       console.error('Error taking photo:', error);
-      showImagePickerUnavailable();
+      Alert.alert('Hata', 'Medya secimi su an kullanilamiyor.');
     }
-  };
-
-  /**
-   * Remove media item from selected list
-   */
-  const handleRemoveMedia = (index) => {
-    setSelectedMedia(selectedMedia.filter((_, i) => i !== index));
-  };
-
-  /**
-   * Handle location tagging
-   */
-  const handleTagLocation = async () => {
-    // In a real app, this would search for POIs from the locations API
-    // For now, show a simple search modal
-    setShowLocationSearch(true);
-  };
-
-  /**
-   * Search for locations (mock implementation)
-   */
-  const handleLocationSearch = async (query) => {
-    // TODO: Implement actual location search using locations API
-    setLocationSearch(query);
   };
 
   const formatTripDate = (dateValue) => {
     if (!dateValue) return 'Tarih belirtilmedi';
     try {
-      return new Date(dateValue).toLocaleDateString('tr-TR', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
+      return new Date(dateValue).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
     } catch {
       return 'Tarih belirtilmedi';
     }
@@ -267,647 +454,518 @@ export default function CreatePostScreen({ route }) {
       const result = await TripService.shareTrip(trip.id);
       return result?.share_link || null;
     } catch (error) {
-      const message =
-        error?.response?.data?.error ||
-        error?.response?.data?.detail ||
-        error?.message ||
-        '';
-      const needsPublic = message.toLowerCase().includes('public itineraries');
-      if (!needsPublic) {
-        throw new Error(message || 'Rota paylaşım bağlantısı oluşturulamadı');
+      const message = error?.response?.data?.error || error?.response?.data?.detail || error?.message || '';
+      if (!message.toLowerCase().includes('public itineraries')) {
+        throw new Error(message || 'Rota paylasim baglantisi olusturulamadi.');
       }
-
       await TripService.updateTrip(trip.id, { visibility: 'PUBLIC' });
-      const refreshedTrip = await TripService.fetchTripById(trip.id);
-      setSelectedTrip(refreshedTrip);
-      const retryResult = await TripService.shareTrip(trip.id);
-      return retryResult?.share_link || null;
-    }
-  };
-
-  /**
-   * Handle form submission
-   */
-  const handleSubmitPost = async () => {
-    // Validate input
-    if (!caption.trim() && selectedMedia.length === 0 && !selectedTrip) {
-      Alert.alert('Hata', 'Lütfen en az bir yazı veya medya ekleyin');
-      return;
-    }
-
-    if (caption.length > 5000) {
-      Alert.alert('Hata', 'Yazı 5000 karakteri aşamaz');
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      // Upload media to S3
-      const mediaUrls = [];
-
-      for (const media of selectedMedia) {
-        try {
-          const uploadedUrl = await SocialService.uploadPostImage(media);
-          mediaUrls.push(uploadedUrl);
-        } catch (error) {
-          console.error('Error uploading media:', error);
-          throw new Error('Medya yüklenirken hata oluştu');
-        }
-      }
-
-      let tripShareLink = null;
-      if (selectedTrip?.id) {
-        tripShareLink = await ensureTripShareLink(selectedTrip);
-      }
-
-      const tripSummaryText = selectedTrip?.id
-        ? `\n\n🗺️ Rota: ${selectedTrip.title}\n📅 Başlangıç: ${formatTripDate(selectedTrip.start_date)}\n📍 Durak: ${selectedTripStopCount}${tripShareLink ? `\n🔗 ${tripShareLink}` : ''}`
-        : '';
-
-      // Create post
-      const postData = {
-        content: `${caption.trim()}${tripSummaryText}`.trim(),
-        media_urls: mediaUrls,
-        location: taggedLocation?.name || null,
-        visibility,
-        tags: selectedTrip?.id ? Array.from(new Set([...tags, 'trip-share'])) : tags,
-      };
-
-      await createPostMutation.mutateAsync(postData);
-      navigation.navigate('CommunityFeed');
-      Alert.alert('Başarılı', 'Gönderiniz paylaşıldı!');
-    } catch (error) {
-      console.error('Error creating post:', error);
-      Alert.alert('Hata', error.message || 'Gönderi oluşturularken bir hata oluştu');
-    } finally {
-      setIsLoading(false);
+      const refreshed = await TripService.fetchTripById(trip.id);
+      setSelectedTrip(refreshed);
+      const retry = await TripService.shareTrip(trip.id);
+      return retry?.share_link || null;
     }
   };
 
   const handleOpenTripPicker = async () => {
-    if (availableTrips.length === 0) {
-      await fetchTrips();
-    }
+    if (availableTrips.length === 0) await fetchTrips();
     setShowTripPicker(true);
   };
 
+  const handleSubmitPost = async () => {
+    if (submitting) return;
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
+    setIsLoading(true);
+    setFormError('');
+    setUploadProgress({ current: 0, total: selectedMedia.length, percent: 0 });
+    try {
+      const mediaUrls = [];
+      for (let index = 0; index < selectedMedia.length; index += 1) {
+        const uploadedUrl = await SocialService.uploadPostImage(selectedMedia[index]);
+        mediaUrls.push(uploadedUrl);
+        const current = index + 1;
+        setUploadProgress({ current, total: selectedMedia.length, percent: Math.round((current / selectedMedia.length) * 100) });
+      }
+      let routeData = routePreview;
+      if (selectedTrip?.id) {
+        const tripShareLink = await ensureTripShareLink(selectedTrip);
+        routeData = buildRouteShareData(
+          selectedTrip,
+          tripShareLink,
+          user?.full_name || user?.username || user?.email || null
+        );
+      }
+      await createPostMutation.mutateAsync({
+        content: caption.trim(),
+        media_urls: mediaUrls,
+        location: taggedLocation?.name || null,
+        visibility,
+        route_data: routeData || {},
+        tags: selectedTrip?.id ? Array.from(new Set([...tags, 'trip-share'])) : tags,
+      });
+      Alert.alert('Basarili', 'Gonderiniz paylasildi.');
+      navigation.navigate('CommunityFeed');
+    } catch (error) {
+      console.error('Error creating post:', error);
+      setFormError(errorMessage(error));
+    } finally {
+      setUploadProgress({ current: 0, total: 0, percent: 0 });
+      setIsLoading(false);
+    }
+  };
+
+  const chooseLocation = (name) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setTaggedLocation({ name: clean });
+    setLocationSearch('');
+    setShowLocation(false);
+    setFormError('');
+  };
+
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.cancelButton}>İptal</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Yeni Gönderi</Text>
-        <TouchableOpacity
-          style={[styles.shareButton, isLoading && styles.shareButtonDisabled]}
-          onPress={handleSubmitPost}
-          disabled={isLoading}
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <KeyboardAvoidingView style={styles.keyboardRoot} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={8}>
+        <Header canSubmit={canSubmit} submitting={submitting} onBack={() => navigation.goBack()} onSubmit={handleSubmitPost} />
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 12) + 104 }]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
-          {isLoading ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.shareButtonText}>Paylaş</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* User Info */}
-        <View style={styles.userSection}>
-          <Image source={{ uri: user?.avatar_url }} style={styles.userAvatar} />
-          <View>
-            <Text style={styles.userName}>{user?.full_name}</Text>
-            <Text style={styles.visibilityLabel}>{visibility}</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.visibilitySelector}
-            onPress={() => setShowVisibilityOptions(true)}
-          >
-            <Text style={styles.selectorIcon}>⚙️</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Caption Input */}
-        <TextInput
-          style={styles.captionInput}
-          placeholder="Deneyimini paylaş..."
-          placeholderTextColor="#999"
-          multiline
-          value={caption}
-          onChangeText={setCaption}
-          maxLength={5000}
-        />
-        <Text style={styles.characterCount}>{caption.length}/5000</Text>
-
-        {/* Selected Media Display */}
-        {selectedMedia.length > 0 && (
-          <View style={styles.mediaSection}>
-            <Text style={styles.sectionTitle}>Seçilen Medya ({selectedMedia.length})</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.mediaList}
-            >
-              {selectedMedia.map((media, index) => (
-                <View key={index} style={styles.mediaItem}>
-                  <Image source={{ uri: media.uri }} style={styles.mediaPreview} />
-                  <TouchableOpacity
-                    style={styles.removeMediaButton}
-                    onPress={() => handleRemoveMedia(index)}
-                  >
-                    <Text style={styles.removeMediaIcon}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Media Selection Buttons */}
-        <View style={styles.mediaButtons}>
-          <TouchableOpacity style={styles.mediaButton} onPress={handlePickMedia}>
-            <Text style={styles.mediaButtonIcon}>🖼️</Text>
-            <Text style={styles.mediaButtonText}>Galeri</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.mediaButton} onPress={handleTakePhoto}>
-            <Text style={styles.mediaButtonIcon}>📷</Text>
-            <Text style={styles.mediaButtonText}>Kamera</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Location Section */}
-        <View style={styles.optionSection}>
-          <TouchableOpacity
-            style={styles.optionButton}
-            onPress={handleTagLocation}
-          >
-            <Text style={styles.optionIcon}>📍</Text>
-            <Text style={styles.optionText}>
-              {taggedLocation ? taggedLocation.name : 'Yer Etiketle'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Tags Section */}
-        <View style={styles.optionSection}>
-          <TextInput
-            style={styles.tagsInput}
-            placeholder="Etiketler ekle (virgülle ayırın)"
-            placeholderTextColor="#999"
-            onChangeText={(text) => {
-              const tagArray = text.split(',').map((tag) => tag.trim());
-              setTags(tagArray.filter((tag) => tag.length > 0));
-            }}
-          />
-        </View>
-
-        <View style={styles.optionSection}>
-          <TouchableOpacity
-            style={styles.optionButton}
-            onPress={handleOpenTripPicker}
-          >
-            <Text style={styles.optionIcon}>🗺️</Text>
-            <Text style={styles.optionText}>
-              {selectedTrip ? 'Rota Seçimi Değiştir' : 'Rota Paylaş'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {selectedTrip && (
-          <View style={styles.selectedTripCard}>
-            <Text style={styles.selectedTripTitle} numberOfLines={1}>{selectedTrip.title}</Text>
-            <Text style={styles.selectedTripMeta}>📅 {formatTripDate(selectedTrip.start_date)}</Text>
-            <Text style={styles.selectedTripMeta}>📍 {selectedTripStopCount} durak</Text>
-          </View>
-        )}
-
-        {tags.length > 0 && (
-          <View style={styles.tagsDisplay}>
-            {tags.map((tag, index) => (
-              <View key={index} style={styles.tag}>
-                <Text style={styles.tagText}>#{tag}</Text>
+          <View style={styles.contentShell}>
+            <Author user={user} visibility={visibility} onPress={() => setShowVisibility(true)} />
+            <CaptionCard
+              caption={caption}
+              error={formError || captionError}
+              onChange={(value) => {
+                setCaption(value);
+                if (formError) setFormError('');
+              }}
+            />
+            <MediaCard
+              media={selectedMedia}
+              tileSize={tileSize}
+              progress={uploadProgress}
+              onPick={handlePickMedia}
+              onCamera={handleTakePhoto}
+              onRemove={(index) => setSelectedMedia((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+            />
+            <DetailsCard
+              location={taggedLocation}
+              trip={selectedTrip}
+              routePreview={routePreview}
+              tagsText={tagsText}
+              onLocation={() => setShowLocation(true)}
+              onClearLocation={() => setTaggedLocation(null)}
+              onTrip={handleOpenTripPicker}
+              onClearTrip={() => setSelectedTrip(null)}
+              onTags={setTagsText}
+            />
+            {tags.length > 0 && (
+              <View style={styles.tagWrap}>
+                {tags.map((tag) => <View key={tag} style={styles.tag}><Text style={styles.tagText}>#{tag}</Text></View>)}
               </View>
-            ))}
+            )}
+            <VisibilityCard value={visibility} onSelect={setVisibility} />
           </View>
-        )}
-      </ScrollView>
+        </ScrollView>
+        <BottomBar bottom={insets.bottom} canSubmit={canSubmit} submitting={submitting} error={validationError} onSubmit={handleSubmitPost} />
 
-      {/* Visibility Options Modal */}
-      <Modal
-        visible={showVisibilityOptions}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowVisibilityOptions(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.visibilityModal}>
-            <Text style={styles.modalTitle}>Gönderinizi Kimler Görebilir?</Text>
-            {visibilityOptions.map((option) => (
-              <TouchableOpacity
-                key={option.value}
-                style={[
-                  styles.visibilityOption,
-                  visibility === option.value && styles.visibilityOptionSelected,
-                ]}
-                onPress={() => {
-                  setVisibility(option.value);
-                  setShowVisibilityOptions(false);
-                }}
-              >
-                <Text style={styles.visibilityOptionIcon}>{option.icon}</Text>
-                <View style={styles.visibilityOptionContent}>
-                  <Text style={styles.visibilityOptionLabel}>{option.label}</Text>
-                </View>
-                {visibility === option.value && (
-                  <Text style={styles.selectedCheckmark}>✓</Text>
-                )}
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => setShowVisibilityOptions(false)}
-            >
-              <Text style={styles.closeButtonText}>Kapat</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={showTripPicker}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowTripPicker(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.tripModal}>
-            <Text style={styles.modalTitle}>Paylaşılacak Rota</Text>
-            {isLoadingTrips ? (
-              <View style={styles.tripListLoader}>
-                <ActivityIndicator size="small" color="#1a1a2e" />
-                <Text style={styles.tripListLoaderText}>Rotalar yükleniyor...</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={availableTrips}
-                keyExtractor={(item) => String(item.id)}
-                ListEmptyComponent={
-                  <Text style={styles.emptyTripText}>Henüz paylaşılacak rota yok.</Text>
-                }
-                renderItem={({ item }) => (
+        <Modal visible={showVisibility} transparent animationType="fade" onRequestClose={() => setShowVisibility(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+              <View style={styles.sheetHandle} />
+              <Text style={styles.sheetTitle}>Gonderiyi kimler gorebilir?</Text>
+              {VISIBILITY.map((item) => {
+                const selected = visibility === item.value;
+                return (
                   <TouchableOpacity
-                    style={[
-                      styles.tripListItem,
-                      selectedTrip?.id === item.id && styles.tripListItemSelected,
-                    ]}
+                    key={item.value}
+                    style={[styles.sheetOption, selected && styles.sheetOptionSelected]}
                     onPress={() => {
-                      setSelectedTrip(item);
-                      setShowTripPicker(false);
+                      setVisibility(item.value);
+                      setShowVisibility(false);
                     }}
                   >
-                    <Text style={styles.tripListItemTitle} numberOfLines={1}>{item.title}</Text>
-                    <Text style={styles.tripListItemMeta}>
-                      {formatTripDate(item.start_date)} • {item.total_stops ?? item.stops?.length ?? 0} durak
-                    </Text>
+                    <View style={[styles.sheetOptionIcon, selected && styles.sheetOptionIconSelected]}>
+                      <Text style={[styles.sheetOptionIconText, selected && styles.sheetOptionIconTextSelected]}>{item.icon}</Text>
+                    </View>
+                    <View style={styles.sheetOptionCopy}>
+                      <Text style={styles.sheetOptionLabel}>{item.label}</Text>
+                      <Text style={styles.sheetOptionText}>{item.hint}</Text>
+                    </View>
+                    {selected && <Text style={styles.sheetCheck}>Secili</Text>}
                   </TouchableOpacity>
-                )}
-              />
-            )}
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => setShowTripPicker(false)}
-            >
-              <Text style={styles.closeButtonText}>Kapat</Text>
-            </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
-        </View>
-      </Modal>
-    </View>
+        </Modal>
+
+        <Modal visible={showLocation} transparent animationType="slide" onRequestClose={() => setShowLocation(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+              <View style={styles.sheetHandle} />
+              <Text style={styles.sheetTitle}>Yer etiketle</Text>
+              <TextInput
+                style={styles.locationInput}
+                placeholder="Mekan, sehir veya rota noktasi yaz"
+                placeholderTextColor="#9aa1ad"
+                value={locationSearch}
+                onChangeText={setLocationSearch}
+                autoFocus
+              />
+              {!!locationSearch.trim() && (
+                <TouchableOpacity style={styles.locationUse} onPress={() => chooseLocation(locationSearch)}>
+                  <Text style={styles.locationUseTitle}>{locationSearch.trim()}</Text>
+                  <Text style={styles.locationUseText}>Bu konumu kullan</Text>
+                </TouchableOpacity>
+              )}
+              <View style={styles.quickWrap}>
+                {QUICK_LOCATIONS.map((item) => (
+                  <TouchableOpacity key={item} style={styles.quickChip} onPress={() => chooseLocation(item)}>
+                    <Text style={styles.quickText}>{item}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity style={styles.sheetClose} onPress={() => setShowLocation(false)}>
+                <Text style={styles.sheetCloseText}>Kapat</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showTripPicker} transparent animationType="slide" onRequestClose={() => setShowTripPicker(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.sheet, styles.tripSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+              <View style={styles.sheetHandle} />
+              <Text style={styles.sheetTitle}>Paylasilacak rota</Text>
+              {isLoadingTrips ? (
+                <View style={styles.sheetLoader}>
+                  <ActivityIndicator size="small" color={C.ink} />
+                  <Text style={styles.sheetLoaderText}>Rotalar yukleniyor...</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={availableTrips}
+                  keyExtractor={(item) => String(item.id)}
+                  showsVerticalScrollIndicator={false}
+                  ListEmptyComponent={<Text style={styles.emptyTrip}>Henuz paylasilacak rota yok.</Text>}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[styles.tripItem, selectedTrip?.id === item.id && styles.tripItemSelected]}
+                      onPress={async () => {
+                        try {
+                          setIsLoadingTrips(true);
+                          const detailedTrip = await TripService.fetchTripById(item.id);
+                          setSelectedTrip(detailedTrip);
+                          setShowTripPicker(false);
+                          setFormError('');
+                        } catch (error) {
+                          Alert.alert('Hata', 'Rota detaylari yuklenemedi.');
+                        } finally {
+                          setIsLoadingTrips(false);
+                        }
+                      }}
+                    >
+                      <Text style={styles.tripTitle} numberOfLines={1}>{item.title}</Text>
+                      <Text style={styles.tripMeta}>{formatTripDate(item.start_date)} - {item.total_stops ?? item.stops?.length ?? 0} durak</Text>
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+              <TouchableOpacity style={styles.sheetClose} onPress={() => setShowTripPicker(false)}>
+                <Text style={styles.sheetCloseText}>Kapat</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
+  safeArea: { flex: 1, backgroundColor: C.page },
+  keyboardRoot: { flex: 1 },
   header: {
+    minHeight: 72,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: C.panel,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  headerGhost: { minWidth: 64, minHeight: 40, justifyContent: 'center' },
+  headerGhostText: { color: C.muted, fontSize: 14, fontWeight: '700' },
+  headerCenter: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
+  headerTitle: { color: C.ink, fontSize: 18, fontWeight: '800' },
+  headerSubtitle: { color: C.muted, fontSize: 12, marginTop: 2 },
+  headerShare: {
+    minWidth: 76,
+    minHeight: 40,
+    borderRadius: 8,
+    backgroundColor: C.ink,
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1a1a2e',
-  },
-  cancelButton: {
-    fontSize: 14,
-    color: '#999',
-    fontWeight: '500',
-  },
-  shareButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#1a1a2e',
-    borderRadius: 6,
-  },
-  shareButtonDisabled: {
-    opacity: 0.6,
-  },
-  shareButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  content: {
-    flex: 1,
-    padding: 16,
-  },
-  userSection: {
+  headerShareText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  disabled: { opacity: 0.45 },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 16, alignItems: 'center' },
+  contentShell: { width: '100%', maxWidth: 760 },
+  author: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    backgroundColor: C.panel,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
   },
-  userAvatar: {
+  avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.soft },
+  authorCopy: { flex: 1, marginLeft: 12 },
+  authorName: { color: C.ink, fontSize: 15, fontWeight: '800' },
+  visibilityMini: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: C.brandSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  visibilityMiniText: { color: C.ink, fontSize: 12, fontWeight: '700' },
+  chevron: { color: C.muted, fontSize: 11, fontWeight: '800', marginLeft: 6 },
+  card: {
+    backgroundColor: C.panel,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 8,
+    padding: 14,
+    marginBottom: 12,
+  },
+  eyebrow: {
+    color: C.muted,
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  captionInput: { minHeight: 150, color: C.text, fontSize: 18, lineHeight: 26, padding: 0 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12 },
+  inlineError: { flex: 1, color: C.danger, fontSize: 12, fontWeight: '700' },
+  hidden: { opacity: 0 },
+  count: { fontSize: 12, fontWeight: '700' },
+  sectionTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  sectionTitle: { color: C.ink, fontSize: 17, fontWeight: '800' },
+  compactAction: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: C.ink },
+  compactActionText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  dropzone: {
+    minHeight: 190,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#cfd6e3',
+    borderRadius: 8,
+    backgroundColor: '#fbfcff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  dropIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    marginRight: 12,
-  },
-  userName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a2e',
-  },
-  visibilityLabel: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 2,
-  },
-  visibilitySelector: {
-    marginLeft: 'auto',
-    padding: 8,
-  },
-  selectorIcon: {
-    fontSize: 18,
-  },
-  captionInput: {
-    fontSize: 16,
-    color: '#1a1a2e',
-    textAlignVertical: 'top',
-    marginBottom: 4,
-    minHeight: 120,
-    paddingVertical: 0,
-  },
-  characterCount: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'right',
-    marginBottom: 16,
-  },
-  mediaSection: {
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a2e',
-    marginBottom: 8,
-  },
-  mediaList: {
+    backgroundColor: C.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
   },
-  mediaItem: {
-    marginRight: 12,
-    borderRadius: 8,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  mediaPreview: {
-    width: 100,
-    height: 100,
-    borderRadius: 8,
-  },
-  removeMediaButton: {
+  dropIconText: { color: '#fff', fontSize: 28, fontWeight: '500', lineHeight: 31 },
+  dropTitle: { color: C.ink, fontSize: 16, fontWeight: '800' },
+  dropText: { color: C.muted, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 6, maxWidth: 330 },
+  mediaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  mediaTile: { borderRadius: 8, overflow: 'hidden', backgroundColor: C.soft, position: 'relative' },
+  mediaPreview: { width: '100%', height: '100%' },
+  mediaBadge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 24,
+    left: 8,
+    top: 8,
+    minWidth: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(26, 26, 46, 0.76)',
+    alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 7,
+  },
+  mediaBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  removeMedia: {
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 0, 0, 0.62)',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  removeMediaIcon: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  mediaButtons: {
-    flexDirection: 'row',
-    marginBottom: 16,
-    gap: 12,
-  },
-  mediaButton: {
+  removeMediaText: { color: '#fff', fontSize: 16, fontWeight: '800', lineHeight: 18 },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  secondaryAction: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderWidth: 2,
-    borderColor: '#f0f0f0',
+    minHeight: 48,
     borderRadius: 8,
-    alignItems: 'center',
-  },
-  mediaButtonIcon: {
-    fontSize: 24,
-    marginBottom: 4,
-  },
-  mediaButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#1a1a2e',
-  },
-  optionSection: {
-    marginBottom: 16,
-  },
-  optionButton: {
+    backgroundColor: C.soft,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    justifyContent: 'center',
     paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: '#f0f0f0',
-    borderRadius: 8,
   },
-  optionIcon: {
-    fontSize: 18,
-    marginRight: 12,
-  },
-  optionText: {
-    fontSize: 14,
-    color: '#1a1a2e',
-    fontWeight: '500',
-  },
+  secondaryIcon: { color: C.ink, fontSize: 11, fontWeight: '900', marginRight: 8 },
+  secondaryText: { color: C.ink, fontSize: 14, fontWeight: '800' },
+  uploadPanel: { marginTop: 12, padding: 12, borderRadius: 8, backgroundColor: C.brandSoft },
+  uploadRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  uploadTitle: { color: C.ink, fontSize: 13, fontWeight: '800' },
+  uploadCount: { color: C.muted, fontSize: 12, fontWeight: '800' },
+  progressTrack: { height: 7, borderRadius: 4, backgroundColor: '#dbe1ec', overflow: 'hidden' },
+  progressFill: { height: 7, borderRadius: 4, backgroundColor: C.ink },
+  detailRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center' },
+  detailIcon: { width: 42, height: 42, borderRadius: 8, backgroundColor: C.brandSoft, alignItems: 'center', justifyContent: 'center' },
+  detailIconText: { color: C.ink, fontSize: 10, fontWeight: '900' },
+  detailCopy: { flex: 1, marginLeft: 12, minWidth: 0 },
+  detailTitle: { color: C.ink, fontSize: 15, fontWeight: '800' },
+  detailText: { color: C.muted, fontSize: 12, marginTop: 3 },
+  clearPill: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: C.soft },
+  clearText: { color: C.muted, fontSize: 12, fontWeight: '800' },
+  divider: { height: 1, backgroundColor: C.line, marginVertical: 8 },
   tagsInput: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    minHeight: 48,
+    marginTop: 12,
     borderWidth: 1,
-    borderColor: '#f0f0f0',
+    borderColor: C.line,
     borderRadius: 8,
+    color: C.text,
     fontSize: 14,
-    color: '#1a1a2e',
-  },
-  tagsDisplay: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 16,
-    gap: 8,
-  },
-  selectedTripCard: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#dfe6e9',
-    backgroundColor: '#f8f9fb',
-    marginBottom: 16,
-  },
-  selectedTripTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a2e',
-  },
-  selectedTripMeta: {
-    fontSize: 12,
-    color: '#596275',
-    marginTop: 4,
-  },
-  tag: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 16,
-  },
-  tagText: {
-    fontSize: 12,
-    color: '#1a1a2e',
-    fontWeight: '500',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  visibilityModal: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-  },
-  tripModal: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    maxHeight: '70%',
-  },
-  tripListLoader: {
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tripListLoaderText: {
-    marginTop: 8,
-    color: '#596275',
-    fontSize: 13,
-  },
-  emptyTripText: {
-    color: '#999',
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
-  tripListItem: {
-    borderWidth: 1,
-    borderColor: '#f0f0f0',
-    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    marginBottom: 8,
+    backgroundColor: '#fbfcff',
   },
-  tripListItemSelected: {
-    borderColor: '#1a1a2e',
-    backgroundColor: '#f4f5fa',
-  },
-  tripListItemTitle: {
-    color: '#1a1a2e',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  tripListItemMeta: {
-    marginTop: 4,
-    fontSize: 12,
-    color: '#596275',
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a2e',
-    marginBottom: 16,
-  },
-  visibilityOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    marginBottom: 8,
+  tagWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  tag: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: C.ink },
+  tagText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  visibilityChips: { flexDirection: 'row', gap: 8 },
+  visibilityChip: {
+    flex: 1,
+    minHeight: 56,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#f0f0f0',
+    borderColor: C.line,
+    backgroundColor: '#fbfcff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 8,
   },
-  visibilityOptionSelected: {
-    backgroundColor: '#f5f5f5',
-    borderColor: '#1a1a2e',
-  },
-  visibilityOptionIcon: {
-    fontSize: 20,
-    marginRight: 12,
-  },
-  visibilityOptionContent: {
-    flex: 1,
-  },
-  visibilityOptionLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1a1a2e',
-  },
-  selectedCheckmark: {
-    fontSize: 18,
-    color: '#1a1a2e',
-    fontWeight: 'bold',
-  },
-  closeButton: {
-    paddingVertical: 12,
+  visibilityChipSelected: { backgroundColor: C.ink, borderColor: C.ink },
+  visibilityIcon: { color: C.ink, fontSize: 12, fontWeight: '900', marginBottom: 4 },
+  visibilityIconSelected: { color: '#fff' },
+  visibilityLabel: { color: C.text, fontSize: 12, fontWeight: '800', textAlign: 'center' },
+  visibilityLabelSelected: { color: '#fff' },
+  visibilityHint: { color: C.muted, fontSize: 12, lineHeight: 18, marginTop: 10 },
+  bottomBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    minHeight: 82,
+    backgroundColor: C.panel,
+    borderTopWidth: 1,
+    borderTopColor: C.line,
     paddingHorizontal: 16,
-    backgroundColor: '#f5f5f5',
+    paddingTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  bottomCopy: { flex: 1, minWidth: 0 },
+  bottomTitle: { color: C.ink, fontSize: 14, fontWeight: '900' },
+  bottomText: { color: C.muted, fontSize: 12, marginTop: 3 },
+  primaryCta: {
+    minWidth: 116,
+    minHeight: 50,
     borderRadius: 8,
-    marginTop: 12,
+    backgroundColor: C.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
   },
-  closeButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a2e',
-    textAlign: 'center',
+  primaryCtaText: { color: '#fff', fontSize: 15, fontWeight: '900' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(10, 12, 18, 0.46)', justifyContent: 'flex-end' },
+  sheet: {
+    width: '100%',
+    maxHeight: '82%',
+    backgroundColor: C.panel,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 10,
   },
+  sheetHandle: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: '#d5dae4', marginBottom: 16 },
+  sheetTitle: { color: C.ink, fontSize: 18, fontWeight: '900', marginBottom: 14 },
+  sheetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 72,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 12,
+    marginBottom: 10,
+    backgroundColor: '#fbfcff',
+  },
+  sheetOptionSelected: { borderColor: C.ink, backgroundColor: C.brandSoft },
+  sheetOptionIcon: { width: 42, height: 42, borderRadius: 8, backgroundColor: C.soft, alignItems: 'center', justifyContent: 'center' },
+  sheetOptionIconSelected: { backgroundColor: C.ink },
+  sheetOptionIconText: { color: C.ink, fontSize: 13, fontWeight: '900' },
+  sheetOptionIconTextSelected: { color: '#fff' },
+  sheetOptionCopy: { flex: 1, marginLeft: 12 },
+  sheetOptionLabel: { color: C.ink, fontSize: 15, fontWeight: '900' },
+  sheetOptionText: { color: C.muted, fontSize: 12, marginTop: 3 },
+  sheetCheck: { color: C.success, fontSize: 12, fontWeight: '900' },
+  locationInput: {
+    minHeight: 50,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.line,
+    color: C.text,
+    fontSize: 15,
+    paddingHorizontal: 14,
+    backgroundColor: '#fbfcff',
+  },
+  locationUse: { marginTop: 12, borderRadius: 8, backgroundColor: C.ink, padding: 14 },
+  locationUseTitle: { color: '#fff', fontSize: 15, fontWeight: '900' },
+  locationUseText: { color: '#d9deea', fontSize: 12, marginTop: 3 },
+  quickWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+  quickChip: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, backgroundColor: C.soft },
+  quickText: { color: C.ink, fontSize: 13, fontWeight: '800' },
+  sheetClose: { marginTop: 14, minHeight: 48, borderRadius: 8, backgroundColor: C.soft, alignItems: 'center', justifyContent: 'center' },
+  sheetCloseText: { color: C.ink, fontSize: 14, fontWeight: '900' },
+  tripSheet: { maxHeight: '76%' },
+  sheetLoader: { minHeight: 120, alignItems: 'center', justifyContent: 'center' },
+  sheetLoaderText: { color: C.muted, fontSize: 13, marginTop: 10 },
+  emptyTrip: { color: C.muted, textAlign: 'center', paddingVertical: 24 },
+  tripItem: { borderWidth: 1, borderColor: C.line, borderRadius: 8, padding: 13, marginBottom: 10, backgroundColor: '#fbfcff' },
+  tripItemSelected: { borderColor: C.ink, backgroundColor: C.brandSoft },
+  tripTitle: { color: C.ink, fontSize: 15, fontWeight: '900' },
+  tripMeta: { color: C.muted, fontSize: 12, marginTop: 5 },
 });

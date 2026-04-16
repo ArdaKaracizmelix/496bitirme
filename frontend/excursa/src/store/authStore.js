@@ -1,12 +1,15 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AuthManager from '../services/AuthManager';
+import { clearUserScopedCache } from '../services/queryClient';
 
 /**
  * Auth Store using Zustand
  * Manages authentication state and user session data
  */
-const useAuthStore = create((set) => ({
+const getUserId = (user) => String(user?.id || user?.profile_id || user?.profile?.id || '');
+
+const useAuthStore = create((set, get) => ({
   user: null,
   token: null,
   isAuthenticated: false,
@@ -16,6 +19,11 @@ const useAuthStore = create((set) => ({
    * Set authentication state with user and token
    */
   setAuth: (user, token) => {
+    const previousUserId = getUserId(get().user);
+    const nextUserId = getUserId(user);
+    if (previousUserId && nextUserId && previousUserId !== nextUserId) {
+      clearUserScopedCache();
+    }
     global.accessToken = token;
     set({ 
       user, 
@@ -39,6 +47,7 @@ const useAuthStore = create((set) => ({
    * Logout and clear authentication
    */
   logout: async () => {
+    clearUserScopedCache();
     global.accessToken = null;
     set({ 
       user: null, 

@@ -155,6 +155,7 @@ class EmailVerificationAuthTests(APITestCase):
                 "full_name": "Test User",
                 "email": "verifyme@example.com",
                 "password": "StrongPass1",
+                "confirm_password": "StrongPass1",
             },
             format="json",
         )
@@ -162,6 +163,9 @@ class EmailVerificationAuthTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         user = User.objects.get(email="verifyme@example.com")
         self.assertFalse(user.is_active)
+        self.assertTrue(response.data["requires_verification"])
+        self.assertNotIn("access", response.data)
+        self.assertNotIn("refresh", response.data)
 
     def test_login_unverified_user_is_rejected(self):
         User.objects.create_user(

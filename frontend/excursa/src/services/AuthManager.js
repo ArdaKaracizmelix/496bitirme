@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
+import { clearUserScopedCache } from './queryClient';
 
 /**
  * AuthManager - Singleton Service for Authentication & Session Management
@@ -67,11 +68,9 @@ class AuthManager {
         { skipAuth: true }
       );
 
-      const { user, access, refresh } = response.data || {};
-      if (user && access) {
-        await this.saveSession({ user, access, refresh });
-      }
-
+      // Register must not create a local session. The account is inactive until
+      // email verification is completed and login succeeds.
+      await this.clearSession();
       return response.data;
     } catch (error) {
       throw error;
@@ -217,6 +216,7 @@ class AuthManager {
    */
   async clearSession() {
     try {
+      clearUserScopedCache();
       await AsyncStorage.multiRemove([
         AuthManager.STORAGE_KEY_TOKEN,
         AuthManager.STORAGE_KEY_REFRESH,

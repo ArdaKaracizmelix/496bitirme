@@ -63,6 +63,9 @@ class AuthService:
             raise ValidationError({"detail": "Email and password are required"})
 
         account = User.objects.filter(email__iexact=normalized_email).first()
+        if account is not None and not account.is_active and account.check_password(password):
+            raise PermissionDenied("Please verify your email before logging in")
+
         username_for_auth = account.username if account else normalized_email
         user = authenticate(username=username_for_auth, password=password)
         if user is None:

@@ -2,9 +2,9 @@
 MongoDB models for the community app using mongoengine.
 """
 from mongoengine import (
-    Document, StringField, ListField, ReferenceField,
+    Document, StringField, ListField,
     EmbeddedDocument, EmbeddedDocumentField, DateTimeField,
-    UUIDField, URLField, ObjectIdField
+    UUIDField, URLField, DictField
 )
 from datetime import datetime, time
 from django.utils import timezone
@@ -59,6 +59,9 @@ class SocialPost(Document):
     
     # Tags for categorization and filtering
     tags = ListField(StringField(), default=list)
+
+    # Optional structured payload for rich post types such as shared routes.
+    route_data = DictField(default=dict)
     
     meta = {
         'collection': 'social_posts',

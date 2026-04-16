@@ -39,7 +39,9 @@ class TTSEngine {
         return;
       }
 
-      const available = await Speech.isAvailableAsync();
+      // expo-speech does not expose isAvailableAsync in SDK 54.
+      // If the module exposes the core speak/stop functions, treat TTS as usable.
+      const available = typeof Speech.speak === 'function' && typeof Speech.stop === 'function';
       this.isAvailable = available;
       console.log(`[TTSEngine] Available: ${available}`);
     } catch (error) {
