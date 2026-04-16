@@ -284,15 +284,34 @@ class FeedService:
             'likes_count': len(post.likes),
             'comments_count': len(post.comments),
             'comments': [
-                {
-                    'user_id': str(c.user_id),
-                    'text': c.text,
-                    'timestamp': c.timestamp.isoformat()
-                } for c in post.comments
+                self._comment_to_dto(c) for c in post.comments
             ],
             'tags': post.tags,
+            'route_data': getattr(post, 'route_data', None) or {},
             'created_at': post.created_at.isoformat(),
             'visibility': post.visibility,
             'virality_score': self.calculate_virality_score(post),
             'liked': liked,
+        }
+
+    def _comment_to_dto(self, comment) -> dict:
+        from user.models import UserProfile
+
+        user_name = 'Gezgin'
+        avatar_url = None
+        try:
+            profile = UserProfile.objects.get(id=comment.user_id)
+            user_name = f"{profile.user.first_name} {profile.user.last_name}".strip()
+            if not user_name:
+                user_name = profile.user.username
+            avatar_url = profile.avatar_url
+        except UserProfile.DoesNotExist:
+            pass
+
+        return {
+            'user_id': str(comment.user_id),
+            'user_name': user_name,
+            'avatar_url': avatar_url,
+            'text': comment.text,
+            'timestamp': comment.timestamp.isoformat()
         }

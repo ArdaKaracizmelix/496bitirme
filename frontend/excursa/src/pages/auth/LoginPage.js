@@ -1,16 +1,38 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import AuthManager from '../../services/AuthManager';
+import { clearUserScopedCache } from '../../services/queryClient';
 import useAuthStore from '../../store/authStore';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const translateLoginError = (error) => {
+  if (!error.response) {
+    return 'Backend sunucusuna ulasilamadi. Telefon ve bilgisayar ayni Wi-Fi aginda mi kontrol et.';
+  }
+
+  const detail = error.response?.data?.detail || error.response?.data?.message;
+  if (error.response?.status === 403 || /verify/i.test(String(detail))) {
+    return 'Giris yapmadan once e-posta adresini dogrulaman gerekiyor. Gelen kutunu kontrol et.';
+  }
+  if (error.response?.status === 401) {
+    return 'Email veya sifre hatali. Bilgilerini kontrol edip tekrar dene.';
+  }
+
+  return detail || 'Giris basarisiz. Bilgilerini kontrol et.';
+};
 
 export default function LoginPage({ navigation, route }) {
   const [email, setEmail] = useState(route?.params?.email || '');
@@ -18,232 +40,330 @@ export default function LoginPage({ navigation, route }) {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [infoMessage, setInfoMessage] = useState(route?.params?.message || '');
   const setAuth = useAuthStore((state) => state.setAuth);
+  const { width } = useWindowDimensions();
+
+  const cardWidth = useMemo(() => Math.min(width - 32, 460), [width]);
 
   useEffect(() => {
-    if (route?.params?.email) {
-      setEmail(route.params.email);
-    }
-  }, [route?.params?.email]);
-
-  const validateEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+    if (route?.params?.email) setEmail(route.params.email);
+    if (route?.params?.message) setInfoMessage(route.params.message);
+  }, [route?.params?.email, route?.params?.message]);
 
   const handleLogin = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
     setErrorMessage('');
+    setInfoMessage('');
 
-    if (!email.trim()) {
-      setErrorMessage('Email adresi gerekli');
+    if (!normalizedEmail) {
+      setErrorMessage('Email adresi gerekli.');
       return;
     }
-
-    if (!validateEmail(email)) {
-      setErrorMessage('Gecerli bir email adresi girin');
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      setErrorMessage('Gecerli bir email adresi gir.');
       return;
     }
-
     if (!password) {
-      setErrorMessage('Sifre gerekli');
-      return;
-    }
-
-    if (password.length < 6) {
-      setErrorMessage('Sifre en az 6 karakter olmali');
+      setErrorMessage('Sifre gerekli.');
       return;
     }
 
     setIsLoading(true);
     try {
-      const result = await AuthManager.login({ email, password });
+      clearUserScopedCache();
+      const result = await AuthManager.login({ email: normalizedEmail, password });
+      clearUserScopedCache();
       setAuth(result.user, result.access);
     } catch (error) {
-      const errorMsg = !error.response
-        ? 'Backend sunucusuna ulasilamadi. Telefon ve bilgisayar ayni Wi-Fi aginda mi, API adresi dogru mu kontrol et.'
-        : error.response?.data?.detail ||
-          error.response?.data?.message ||
-          'Giris basarisiz. Bilgilerini kontrol et.';
-      setErrorMessage(errorMsg);
+      setErrorMessage(translateLoginError(error));
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <Text style={styles.title}>EXCURSA</Text>
-      <Text style={styles.subtitle}>Seyahatini kesfet</Text>
-
-      {errorMessage ? (
-        <View style={styles.errorContainer}>
-          <Text style={styles.error}>{errorMessage}</Text>
-        </View>
-      ) : null}
-
-      <TextInput
-        style={[styles.input, email && !validateEmail(email) && styles.inputError]}
-        placeholder="Email"
-        value={email}
-        onChangeText={(text) => {
-          setEmail(text);
-          setErrorMessage('');
-        }}
-        autoCapitalize="none"
-        keyboardType="email-address"
-        placeholderTextColor="#999"
-        editable={!isLoading}
-      />
-
-      <View style={styles.passwordContainer}>
-        <TextInput
-          style={styles.passwordInput}
-          placeholder="Sifre"
-          value={password}
-          onChangeText={(text) => {
-            setPassword(text);
-            setErrorMessage('');
-          }}
-          secureTextEntry={!isPasswordVisible}
-          placeholderTextColor="#999"
-          editable={!isLoading}
-        />
-        <TouchableOpacity
-          onPress={() => setIsPasswordVisible((value) => !value)}
-          style={styles.visibilityToggle}
-          disabled={!password}
-        >
-          <Text style={styles.visibilityText}>
-            {isPasswordVisible ? 'Gizle' : 'Goster'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <TouchableOpacity
-        style={[styles.button, isLoading && styles.buttonDisabled]}
-        onPress={handleLogin}
-        disabled={isLoading}
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.keyboardRoot}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {isLoading ? (
-          <ActivityIndicator color="#fff" size="small" />
-        ) : (
-          <Text style={styles.buttonText}>Giris Yap</Text>
-        )}
-      </TouchableOpacity>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.card, { width: cardWidth }]}>
+            <View style={styles.brandMark}>
+              <Text style={styles.brandMarkText}>E</Text>
+            </View>
+            <Text style={styles.brand}>EXCURSA</Text>
+            <Text style={styles.title}>Tekrar hos geldin</Text>
+            <Text style={styles.subtitle}>
+              Rotalarina, kayitli gezilerine ve seyahat akisina kaldigin yerden devam et.
+            </Text>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Hesabin yok mu? </Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Register')} disabled={isLoading}>
-          <Text style={styles.link}>Kayit ol</Text>
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+            {infoMessage ? (
+              <View style={styles.infoBox}>
+                <Text style={styles.infoTitle}>E-posta dogrulamasi bekleniyor</Text>
+                <Text style={styles.infoText}>{infoMessage}</Text>
+              </View>
+            ) : null}
+
+            {errorMessage ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{errorMessage}</Text>
+              </View>
+            ) : null}
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Email</Text>
+              <TextInput
+                style={[styles.input, email && !EMAIL_REGEX.test(email.trim()) && styles.inputError]}
+                value={email}
+                onChangeText={(text) => {
+                  setEmail(text);
+                  setErrorMessage('');
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                placeholderTextColor="#9a9184"
+                editable={!isLoading}
+              />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Sifre</Text>
+              <View style={styles.passwordShell}>
+                <TextInput
+                  style={styles.passwordInput}
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    setErrorMessage('');
+                  }}
+                  secureTextEntry={!isPasswordVisible}
+                  placeholderTextColor="#9a9184"
+                  editable={!isLoading}
+                />
+                <TouchableOpacity
+                  style={styles.visibilityButton}
+                  onPress={() => setIsPasswordVisible((value) => !value)}
+                  disabled={!password || isLoading}
+                >
+                  <Text style={styles.visibilityText}>
+                    {isPasswordVisible ? 'Gizle' : 'Goster'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
+              onPress={handleLogin}
+              disabled={isLoading}
+              activeOpacity={0.9}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Giris Yap</Text>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.footer}>
+              <Text style={styles.footerText}>Hesabin yok mu?</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Register')} disabled={isLoading}>
+                <Text style={styles.footerLink}>Kayit ol</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    justifyContent: 'center',
+    backgroundColor: '#f7f3ea',
+  },
+  keyboardRoot: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    paddingVertical: 28,
+  },
+  card: {
+    borderRadius: 32,
     padding: 24,
-    backgroundColor: '#fff',
+    backgroundColor: '#fffdf8',
+    borderWidth: 1,
+    borderColor: '#ebe1d1',
+    shadowColor: '#1a1a2e',
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.1,
+    shadowRadius: 28,
+    elevation: 5,
+  },
+  brandMark: {
+    width: 54,
+    height: 54,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1a1a2e',
+    marginBottom: 18,
+  },
+  brandMarkText: {
+    color: '#d7c49e',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  brand: {
+    color: '#9b8356',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1.8,
+    marginBottom: 6,
   },
   title: {
-    fontSize: 36,
-    fontWeight: 'bold',
     color: '#1a1a2e',
-    marginBottom: 8,
+    fontSize: 30,
+    fontWeight: '900',
+    letterSpacing: -0.6,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 40,
-  },
-  errorContainer: {
-    width: '100%',
-    backgroundColor: '#ffe6e6',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 20,
-    borderLeftWidth: 4,
-    borderLeftColor: '#cc0000',
-  },
-  error: {
-    color: '#cc0000',
+    color: '#746b5e',
     fontSize: 14,
+    lineHeight: 21,
+    marginTop: 8,
+    marginBottom: 22,
+  },
+  infoBox: {
+    borderRadius: 18,
+    padding: 14,
+    backgroundColor: '#eef7ef',
+    borderWidth: 1,
+    borderColor: '#c8e6cf',
+    marginBottom: 14,
+  },
+  infoTitle: {
+    color: '#1f7a43',
+    fontSize: 13,
+    fontWeight: '900',
+    marginBottom: 3,
+  },
+  infoText: {
+    color: '#2f6844',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  errorBox: {
+    borderRadius: 18,
+    padding: 14,
+    backgroundColor: '#ffe8e8',
+    borderWidth: 1,
+    borderColor: '#ffd0d0',
+    marginBottom: 14,
+  },
+  errorText: {
+    color: '#bd2b2b',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  fieldGroup: {
+    marginBottom: 14,
+  },
+  label: {
+    color: '#1a1a2e',
+    fontSize: 13,
+    fontWeight: '900',
+    marginBottom: 8,
   },
   input: {
     width: '100%',
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    fontSize: 16,
-    backgroundColor: '#f9f9f9',
+    borderColor: '#e2d7c7',
+    borderRadius: 18,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
+    color: '#1a1a2e',
+    fontSize: 15,
+    backgroundColor: '#f7f3ea',
   },
   inputError: {
-    borderColor: '#cc0000',
+    borderColor: '#d84a4a',
   },
-  passwordContainer: {
-    width: '100%',
+  passwordShell: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    paddingRight: 12,
-    marginBottom: 16,
-    backgroundColor: '#f9f9f9',
+    borderColor: '#e2d7c7',
+    borderRadius: 18,
+    backgroundColor: '#f7f3ea',
   },
   passwordInput: {
     flex: 1,
-    padding: 16,
-    fontSize: 16,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
+    color: '#1a1a2e',
+    fontSize: 15,
   },
-  visibilityToggle: {
-    padding: 8,
+  visibilityButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   visibilityText: {
-    color: '#1a1a2e',
+    color: '#9b8356',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '900',
   },
-  button: {
-    width: '100%',
-    backgroundColor: '#1a1a2e',
-    padding: 16,
-    borderRadius: 12,
+  primaryButton: {
+    height: 54,
+    borderRadius: 18,
     alignItems: 'center',
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    justifyContent: 'center',
+    backgroundColor: '#1a1a2e',
+    marginTop: 6,
+    shadowColor: '#1a1a2e',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 4,
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.62,
   },
-  buttonText: {
+  primaryButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '900',
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 6,
+    marginTop: 22,
   },
   footerText: {
-    color: '#666',
-    fontSize: 14,
+    color: '#81786b',
+    fontSize: 13,
+    fontWeight: '700',
   },
-  link: {
+  footerLink: {
     color: '#1a1a2e',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '900',
     textDecorationLine: 'underline',
   },
 });

@@ -6,42 +6,102 @@ class ChatSession:
     """
     Handles a multi-turn chatbot session.
     Keeps history, detects intent, builds prompts, and calls the LLM client.
+    Falls back to a local travel assistant when LLM env/config is unavailable.
     """
 
     def __init__(self, user_id=None):
         self.user_id = user_id
         self.intent_parser = NLPIntentParser()
-        self.llm_client = LLMClient()
+        self.llm_client = self._build_llm_client()
         self.history = []
 
     def process_message(self, message: str) -> dict:
-        # Kullanıcının intentini bul
         intent = self.intent_parser.parse_intent(message)
 
-        # Kullanıcı mesajını history'ye ekle
         self.history.append({
             "role": "user",
-            "content": message
+            "content": message,
         })
 
-        # LLM'e gönderilecek message listesini oluştur
         messages = self._build_messages(intent=intent)
+        llm_response = self._generate_response(
+            messages=messages,
+            intent=intent,
+            message=message,
+        )
 
-        # LLM cevabını al
-        llm_response = self.llm_client.generate_response(messages=messages)
-
-        # Asistan cevabını history'ye ekle
         self.history.append({
             "role": "assistant",
-            "content": llm_response
+            "content": llm_response,
         })
 
-        # Sonucu döndür
         return {
             "intent": intent,
             "response": llm_response,
-            "history": self.history
+            "history": self.history,
+            "confidence": 0.85 if self.llm_client else 0.55,
         }
+
+    def _build_llm_client(self):
+        try:
+            return LLMClient()
+        except Exception:
+            return None
+
+    def _generate_response(self, messages: list, intent: str, message: str) -> str:
+        if self.llm_client:
+            try:
+                return self.llm_client.generate_response(messages=messages)
+            except Exception:
+                pass
+
+        return self._fallback_response(intent=intent, message=message)
+
+    def _fallback_response(self, intent: str, message: str) -> str:
+        message_lower = message.lower()
+
+        if intent == "greeting":
+            return (
+                "Merhaba! Ben EXCURSA asistanin. Sehir, rota, gezi suresi veya "
+                "ilgi alanlarini yazarsan sana hizlica oneriler sunabilirim."
+            )
+
+        if "istanbul" in message_lower:
+            return (
+                "Istanbul icin guzel bir baslangic rotasi: Sultanahmet, Ayasofya, "
+                "Topkapi Sarayi, Galata ve Karakoy. Daha sakin bir plan istersen "
+                "Balat, Kuzguncuk veya Moda tarafini da ekleyebiliriz."
+            )
+
+        if intent == "travel_recommendation":
+            return (
+                "Tabii. Sana daha iyi gezi onerisi yapmam icin sehir, kac gun "
+                "kalacagin ve ilgi alanlarini yazabilir misin? Ornek: 'Istanbul, "
+                "2 gun, tarih ve yemek'."
+            )
+
+        if intent == "location_query":
+            return (
+                "Konum icin hangi sehir veya mekanla ilgilendigini soylersen "
+                "ulasim, yakin yerler ve rota onerisi seklinde yardimci olurum."
+            )
+
+        if intent == "help":
+            return (
+                "Sana gezi rotasi olusturma, gezilecek yer onerme, mekanlari "
+                "rotaya ekleme ve seyahat fikirleri konusunda yardimci olabilirim."
+            )
+
+        if intent == "community":
+            return (
+                "Topluluk akisinda diger gezginlerin paylasimlarini gorebilir, "
+                "yorum yapabilir ve kendi gezi anilarini paylasabilirsin."
+            )
+
+        return (
+            "Bunu not aldim. Bana sehir, sure veya ilgi alanlarini biraz daha "
+            "detayli yazarsan daha net bir seyahat onerisi hazirlayabilirim."
+        )
 
     def _build_messages(self, intent: str) -> list:
         system_prompt = self._get_system_prompt(intent)
@@ -49,11 +109,10 @@ class ChatSession:
         messages = [
             {
                 "role": "system",
-                "content": system_prompt
+                "content": system_prompt,
             }
         ]
 
-        # Son 10 mesajı bağlam olarak ekle
         for item in self.history[-10:]:
             messages.append(item)
 
@@ -95,4 +154,7 @@ class ChatSession:
             ),
         }
 
-        return f"{base_prompt}\n\nIntent guidance: {intent_prompts.get(intent, intent_prompts['general_chat'])}"
+        return (
+            f"{base_prompt}\n\nIntent guidance: "
+            f"{intent_prompts.get(intent, intent_prompts['general_chat'])}"
+        )

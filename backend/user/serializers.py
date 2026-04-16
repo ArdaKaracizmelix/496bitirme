@@ -11,8 +11,11 @@ User = get_user_model()
 class UserProfileSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True)
     email = serializers.CharField(source="user.email", read_only=True)
+    full_name = serializers.SerializerMethodField()
     has_interests = serializers.SerializerMethodField()
     interests = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
+    is_own_profile = serializers.SerializerMethodField()
 
     class Meta:
         model = UserProfile
@@ -20,6 +23,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "id",
             "username",
             "email",
+            "full_name",
             "avatar_url",
             "bio",
             "followers_count",
@@ -27,7 +31,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "is_verified",
             "has_interests",
             "interests",
+            "is_following",
+            "is_own_profile",
         ]
+
+    def get_full_name(self, obj):
+        return f"{obj.user.first_name} {obj.user.last_name}".strip()
 
     def get_has_interests(self, obj):
         return bool(obj.preferences_vector)
@@ -37,9 +46,28 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return []
         return list(obj.preferences_vector.keys())
 
+    def get_is_following(self, obj):
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None) or not request.user.is_authenticated:
+            return False
+        viewer_profile = getattr(request.user, "profile", None)
+        if viewer_profile is None or viewer_profile == obj:
+            return False
+        return viewer_profile.is_following(obj)
+
+    def get_is_own_profile(self, obj):
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None) or not request.user.is_authenticated:
+            return False
+        viewer_profile = getattr(request.user, "profile", None)
+        return viewer_profile == obj
+
 class FollowActionSerializer(serializers.Serializer):
     success = serializers.BooleanField()
     message = serializers.CharField()
+    is_following = serializers.BooleanField()
+    followers_count = serializers.IntegerField()
+    following_count = serializers.IntegerField()
 
 
 class LoginRequestSerializer(serializers.Serializer):
@@ -153,6 +181,6 @@ class UserRegistrationSerializer(serializers.Serializer):
             first_name=first_name,
             last_name=last_name,
             password=password,
-            is_active=True,
+            is_active=False,
         )
         return user

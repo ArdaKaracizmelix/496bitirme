@@ -8,9 +8,23 @@ class NLPIntentParser:
     def __init__(self):
         self.intent_keywords = {
             "greeting": ["merhaba", "selam", "hello", "hi"],
-            "travel_recommendation": ["gezi", "trip", "rota", "öneri", "recommend", "tatil"],
+            "travel_recommendation": [
+                "gezi",
+                "gez",
+                "gezilecek",
+                "trip",
+                "rota",
+                "öneri",
+                "oner",
+                "recommend",
+                "tatil",
+                "mekan",
+                "istanbul",
+                "ankara",
+                "izmir",
+            ],
             "location_query": ["konum", "location", "nerede", "where", "adres"],
-            "help": ["yardım", "help", "destek"],
+            "help": ["yardım", "yardim", "help", "destek"],
             "community": ["topluluk", "community", "grup", "forum"],
         }
 

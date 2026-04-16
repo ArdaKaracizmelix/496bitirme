@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,17 +13,17 @@ import {
   Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useUserPosts, useUserProfile } from '../hooks/useSocial';
+import {
+  useFollowUser,
+  useUnfollowUser,
+  useUserPosts,
+  useUserProfile,
+} from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
 
 const screenWidth = Dimensions.get('window').width;
-const itemWidth = (screenWidth - 3) / 3; // 3 columns with 1px gap
+const itemWidth = (screenWidth - 27) / 3;
 
-/**
- * ProfileScreen Component
- * Displays user profile with stats, posts grid, and map view
- * Can show own profile or other users' profiles
- */
 export default function ProfileScreen({ route }) {
   const navigation = useNavigation();
   const { user: currentUser } = useAuthStore();
@@ -33,8 +33,6 @@ export default function ProfileScreen({ route }) {
     currentUser?.id || currentUser?.profile_id || currentUser?.profile?.id || ''
   );
   const routeUserId = routeParams.userId ? String(routeParams.userId) : '';
-
-  // Determine which user profile to show
   const isOwnProfile = !routeUserId || routeUserId === currentUserId;
   const userId = routeUserId || currentUserId;
 
@@ -44,8 +42,6 @@ export default function ProfileScreen({ route }) {
     isError: isProfileError,
     refetch: refetchProfile,
   } = useUserProfile(userId, isOwnProfile);
-
-  // Fetch user posts
   const {
     data: postsData,
     isLoading: isPostsLoading,
@@ -53,104 +49,109 @@ export default function ProfileScreen({ route }) {
     refetch: refetchPosts,
   } = useUserPosts(userId);
 
-  const [activeTab, setActiveTab] = useState('grid'); // 'grid' or 'map'
-  const [isFollowing, setIsFollowing] = useState(false);
+  const followMutation = useFollowUser();
+  const unfollowMutation = useUnfollowUser();
+  const [activeTab, setActiveTab] = useState('grid');
 
   const posts = postsData?.results || [];
   const postsCount = postsData?.count ?? posts.length;
   const isLoading = isProfileLoading || isPostsLoading;
   const isError = isProfileError || isPostsError;
+  const isFollowing = !isOwnProfile && !!profileData?.is_following;
+  const isFollowUpdating = followMutation.isPending || unfollowMutation.isPending;
 
-  const userProfile = {
-    id: userId,
-    full_name: isOwnProfile
-      ? (currentUser?.full_name || profileData?.username || profileData?.email || 'Kullanıcı')
-      : (routeParams.full_name || routeParams.user_name || profileData?.username || profileData?.email || 'Kullanıcı'),
-    avatar_url: profileData?.avatar_url || routeParams.avatar_url || currentUser?.avatar_url || 'https://i.pravatar.cc/150?img=1',
-    bio: profileData?.bio ?? routeParams.bio ?? currentUser?.bio ?? '',
-    followers_count: profileData?.followers_count ?? currentUser?.followers_count ?? routeParams.followers_count ?? 0,
-    following_count: profileData?.following_count ?? currentUser?.following_count ?? routeParams.following_count ?? 0,
-  };
+  const userProfile = useMemo(
+    () => ({
+      id: userId,
+      full_name:
+        routeParams.full_name ||
+        routeParams.user_name ||
+        profileData?.full_name ||
+        currentUser?.full_name ||
+        profileData?.username ||
+        profileData?.email ||
+        'Kullanici',
+      avatar_url:
+        profileData?.avatar_url ||
+        routeParams.avatar_url ||
+        currentUser?.avatar_url ||
+        'https://i.pravatar.cc/150?img=1',
+      bio: profileData?.bio ?? routeParams.bio ?? currentUser?.bio ?? '',
+      followers_count:
+        profileData?.followers_count ??
+        routeParams.followers_count ??
+        currentUser?.followers_count ??
+        0,
+      following_count:
+        profileData?.following_count ??
+        routeParams.following_count ??
+        currentUser?.following_count ??
+        0,
+    }),
+    [currentUser, profileData, routeParams, userId]
+  );
 
   const handleLogout = () => {
     const runLogout = async () => {
       try {
         await logout();
-      } catch (error) {
-        Alert.alert('Hata', 'Çıkış yapılırken bir hata oluştu.');
+      } catch {
+        Alert.alert('Hata', 'Cikis yapilirken bir hata olustu.');
       }
     };
 
     if (Platform.OS === 'web') {
-      const confirmed = typeof window !== 'undefined'
-        ? window.confirm('Hesabınızdan çıkış yapmak istiyor musunuz?')
-        : true;
+      const confirmed =
+        typeof window !== 'undefined'
+          ? window.confirm('Hesabinizdan cikis yapmak istiyor musunuz?')
+          : true;
       if (confirmed) {
         runLogout();
       }
       return;
     }
 
-    Alert.alert(
-      'Çıkış Yap',
-      'Hesabınızdan çıkış yapmak istiyor musunuz?',
-      [
-        { text: 'İptal', style: 'cancel' },
-        {
-          text: 'Çıkış Yap',
-          style: 'destructive',
-          onPress: runLogout,
-        },
-      ]
-    );
+    Alert.alert('Cikis Yap', 'Hesabinizdan cikis yapmak istiyor musunuz?', [
+      { text: 'Iptal', style: 'cancel' },
+      { text: 'Cikis Yap', style: 'destructive', onPress: runLogout },
+    ]);
   };
 
-  /**
-   * Handle follow/unfollow
-   */
   const handleFollowToggle = async () => {
-    if (isOwnProfile) return;
+    if (isOwnProfile || isFollowUpdating) return;
 
     try {
-      setIsFollowing(!isFollowing);
-      // TODO: Call backend follow/unfollow API
-      Alert.alert(
-        'Bilgi',
-        isFollowing ? 'Artık bu kullanıcıyı takip etmiyorsunuz' : 'Takip edildi!',
-        [{ text: 'Tamam' }]
-      );
+      if (isFollowing) {
+        await unfollowMutation.mutateAsync(userId);
+      } else {
+        await followMutation.mutateAsync(userId);
+      }
     } catch (error) {
-      Alert.alert('Hata', 'Takip işlemi başarısız oldu');
-      setIsFollowing(!isFollowing);
+      const message =
+        error?.response?.data?.message ||
+        error?.response?.data?.detail ||
+        'Takip islemi basarisiz oldu.';
+      Alert.alert('Hata', message);
     }
   };
 
-  /**
-   * Handle message
-   */
   const handleMessage = () => {
-    if (isOwnProfile) {
-      return;
-    }
-    navigation.navigate('Chat', { userId, userName: userProfile.full_name });
+    if (isOwnProfile) return;
+    Alert.alert('Bilgi', 'Mesajlasma ekrani yakinda gelecek.');
   };
 
-  /**
-   * Render profile header
-   */
   const renderHeader = () => (
     <View style={styles.headerContainer}>
-      {/* Profile Photo and Stats */}
       <View style={styles.topSection}>
         <Image source={{ uri: userProfile.avatar_url }} style={styles.profileAvatar} />
         <View style={styles.statsContainer}>
           <View style={styles.stat}>
             <Text style={styles.statNumber}>{postsCount}</Text>
-            <Text style={styles.statLabel}>Gönderi</Text>
+            <Text style={styles.statLabel}>Gonderi</Text>
           </View>
           <View style={styles.stat}>
             <Text style={styles.statNumber}>{userProfile.followers_count}</Text>
-            <Text style={styles.statLabel}>Takipçi</Text>
+            <Text style={styles.statLabel}>Takipci</Text>
           </View>
           <View style={styles.stat}>
             <Text style={styles.statNumber}>{userProfile.following_count}</Text>
@@ -159,32 +160,29 @@ export default function ProfileScreen({ route }) {
         </View>
       </View>
 
-      {/* Profile Info */}
       <View style={styles.infoSection}>
-          <Text style={styles.profileName}>{userProfile.full_name}</Text>
+        <Text style={styles.profileName}>{userProfile.full_name}</Text>
         {!!userProfile.bio && <Text style={styles.profileBio}>{userProfile.bio}</Text>}
       </View>
 
-      {/* Travel Stats */}
       <View style={styles.travelStats}>
         <View style={styles.statBox}>
-          <Text style={styles.statBoxIcon}>🌍</Text>
-          <Text style={styles.statBoxValue}>-</Text>
-          <Text style={styles.statBoxLabel}>Ülke</Text>
+          <Text style={styles.statBoxIcon}>P</Text>
+          <Text style={styles.statBoxValue}>{profileData?.is_verified ? 'Onayli' : '-'}</Text>
+          <Text style={styles.statBoxLabel}>Profil</Text>
         </View>
         <View style={styles.statBox}>
-          <Text style={styles.statBoxIcon}>🏙️</Text>
-          <Text style={styles.statBoxValue}>-</Text>
-          <Text style={styles.statBoxLabel}>Şehir</Text>
+          <Text style={styles.statBoxIcon}>I</Text>
+          <Text style={styles.statBoxValue}>{profileData?.interests?.length || 0}</Text>
+          <Text style={styles.statBoxLabel}>Ilgi</Text>
         </View>
         <View style={styles.statBox}>
-          <Text style={styles.statBoxIcon}>✈️</Text>
-          <Text style={styles.statBoxValue}>-</Text>
-          <Text style={styles.statBoxLabel}>Km</Text>
+          <Text style={styles.statBoxIcon}>A</Text>
+          <Text style={styles.statBoxValue}>{profileData?.has_interests ? 'Aktif' : '-'}</Text>
+          <Text style={styles.statBoxLabel}>Akis</Text>
         </View>
       </View>
 
-      {/* Action Buttons */}
       <View style={styles.actionButtons}>
         {isOwnProfile ? (
           <>
@@ -192,13 +190,13 @@ export default function ProfileScreen({ route }) {
               style={styles.actionButton}
               onPress={() => navigation.navigate('EditProfile')}
             >
-              <Text style={styles.actionButtonText}>Profili Düzenle</Text>
+              <Text style={styles.actionButtonText}>Profili Duzenle</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionButton, styles.secondaryButton]}
-              onPress={() => Alert.alert('Ayarlar', 'Ayarlar sayfası yakında gelecek')}
+              onPress={() => Alert.alert('Ayarlar', 'Ayarlar sayfasi yakinda gelecek.')}
             >
-              <Text style={styles.secondaryButtonText}>⚙️</Text>
+              <Text style={styles.secondaryButtonText}>A</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -207,31 +205,36 @@ export default function ProfileScreen({ route }) {
               style={[
                 styles.actionButton,
                 isFollowing && styles.followingButton,
+                isFollowUpdating && styles.actionDisabled,
               ]}
               onPress={handleFollowToggle}
+              disabled={isFollowUpdating}
             >
-              <Text style={isFollowing ? styles.followingButtonText : styles.actionButtonText}>
-                {isFollowing ? 'Takip Ediliyor' : 'Takip Et'}
-              </Text>
+              {isFollowUpdating ? (
+                <ActivityIndicator size="small" color={isFollowing ? '#1a1a2e' : '#fff'} />
+              ) : (
+                <Text style={isFollowing ? styles.followingButtonText : styles.actionButtonText}>
+                  {isFollowing ? 'Takip Ediliyor' : 'Takip Et'}
+                </Text>
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionButton, styles.messageButton]}
               onPress={handleMessage}
             >
-              <Text style={styles.messageButtonText}>💬</Text>
+              <Text style={styles.messageButtonText}>Mesaj</Text>
             </TouchableOpacity>
           </>
         )}
       </View>
 
-      {/* Tab Navigation */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'grid' && styles.tabActive]}
           onPress={() => setActiveTab('grid')}
         >
           <Text style={[styles.tabText, activeTab === 'grid' && styles.tabTextActive]}>
-            🖼️ Grid
+            Grid
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -239,25 +242,19 @@ export default function ProfileScreen({ route }) {
           onPress={() => setActiveTab('map')}
         >
           <Text style={[styles.tabText, activeTab === 'map' && styles.tabTextActive]}>
-            🗺️ Harita
+            Harita
           </Text>
         </TouchableOpacity>
       </View>
 
       {isOwnProfile && (
-        <TouchableOpacity
-          style={styles.logoutButton}
-          onPress={handleLogout}
-        >
-          <Text style={styles.logoutButtonText}>Çıkış Yap</Text>
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <Text style={styles.logoutButtonText}>Cikis Yap</Text>
         </TouchableOpacity>
       )}
     </View>
   );
 
-  /**
-   * Render post grid item
-   */
   const renderPostItem = ({ item }) => (
     <TouchableOpacity
       style={styles.gridItem}
@@ -269,42 +266,30 @@ export default function ProfileScreen({ route }) {
       }
     >
       {item.media_urls?.[0] ? (
-        <Image
-          source={{ uri: item.media_urls[0] }}
-          style={styles.gridImage}
-        />
+        <Image source={{ uri: item.media_urls[0] }} style={styles.gridImage} />
       ) : (
         <View style={styles.gridImagePlaceholder}>
-          <Text style={styles.gridImagePlaceholderText}>🖼️</Text>
-        </View>
-      )}
-      {item.media_urls && item.media_urls.length > 1 && (
-        <View style={styles.multiMediaIndicator}>
-          <Text style={styles.multiMediaIcon}>📷</Text>
+          <Text style={styles.gridImagePlaceholderText}>Post</Text>
         </View>
       )}
       <View style={styles.gridOverlay}>
         <View style={styles.gridStats}>
-          <Text style={styles.gridStatItem}>❤️ {item.likes_count || 0}</Text>
-          <Text style={styles.gridStatItem}>💬 {item.comments_count || 0}</Text>
+          <Text style={styles.gridStatItem}>L {item.likes_count || 0}</Text>
+          <Text style={styles.gridStatItem}>Y {item.comments_count || 0}</Text>
         </View>
       </View>
     </TouchableOpacity>
   );
 
-  /**
-   * Render map view (placeholder)
-   */
   const renderMapView = () => (
     <View style={styles.mapContainer}>
       <View style={styles.mapPlaceholder}>
-        <Text style={styles.mapPlaceholderIcon}>🗺️</Text>
-        <Text style={styles.mapPlaceholderText}>Harita görünümü çok yakında</Text>
+        <Text style={styles.mapPlaceholderIcon}>Harita</Text>
+        <Text style={styles.mapPlaceholderText}>Harita gorunumu yakinda gelecek</Text>
       </View>
     </View>
   );
 
-  // Render loading state
   if (isLoading) {
     return (
       <View style={styles.container}>
@@ -316,13 +301,12 @@ export default function ProfileScreen({ route }) {
     );
   }
 
-  // Render error state
   if (isError) {
     return (
       <View style={styles.container}>
         {renderHeader()}
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Veriler yüklenemedi</Text>
+          <Text style={styles.errorText}>Veriler yuklenemedi</Text>
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => {
@@ -330,7 +314,7 @@ export default function ProfileScreen({ route }) {
               refetchPosts();
             }}
           >
-            <Text style={styles.retryButtonText}>Tekrar Deneyin</Text>
+            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -349,13 +333,13 @@ export default function ProfileScreen({ route }) {
           ListHeaderComponent={renderHeader}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Henüz gönderi yok</Text>
+              <Text style={styles.emptyText}>Henuz gonderi yok</Text>
               {isOwnProfile && (
                 <TouchableOpacity
                   style={styles.createButton}
                   onPress={() => navigation.navigate('CreatePost')}
                 >
-                  <Text style={styles.createButtonText}>İlk Gönderini Oluştur</Text>
+                  <Text style={styles.createButtonText}>Ilk gonderini olustur</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -443,8 +427,10 @@ const styles = StyleSheet.create({
     borderColor: '#f0f0f0',
   },
   statBoxIcon: {
-    fontSize: 24,
+    fontSize: 18,
     marginBottom: 4,
+    color: '#1a1a2e',
+    fontWeight: '800',
   },
   statBoxValue: {
     fontSize: 14,
@@ -468,6 +454,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a2e',
     borderRadius: 8,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 42,
   },
   actionButtonText: {
     color: '#fff',
@@ -480,7 +468,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   secondaryButtonText: {
-    fontSize: 18,
+    fontSize: 16,
+    color: '#1a1a2e',
+    fontWeight: '700',
   },
   followingButton: {
     backgroundColor: '#f5f5f5',
@@ -492,13 +482,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  actionDisabled: {
+    opacity: 0.6,
+  },
   messageButton: {
     flex: 0,
-    width: '20%',
+    width: '24%',
     backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#d9d9d9',
   },
   messageButtonText: {
-    fontSize: 18,
+    fontSize: 13,
+    color: '#1a1a2e',
+    fontWeight: '700',
   },
   tabContainer: {
     flexDirection: 'row',
@@ -563,33 +560,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#e5e5e5',
   },
   gridImagePlaceholderText: {
-    fontSize: 22,
-    color: '#888',
-  },
-  multiMediaIndicator: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 24,
-    height: 24,
-    borderRadius: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  multiMediaIcon: {
-    fontSize: 12,
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '700',
   },
   gridOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: 40,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    minHeight: 30,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
     justifyContent: 'center',
     alignItems: 'center',
-    opacity: 0,
   },
   gridStats: {
     flexDirection: 'row',
@@ -659,8 +642,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   mapPlaceholderIcon: {
-    fontSize: 48,
+    fontSize: 20,
     marginBottom: 12,
+    color: '#1a1a2e',
+    fontWeight: '700',
   },
   mapPlaceholderText: {
     fontSize: 14,

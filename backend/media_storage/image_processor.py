@@ -7,7 +7,7 @@ resizing, format conversion and metadata removal. It leverages the Pillow
 """
 import io
 from typing import Tuple
-from PIL import Image
+from PIL import Image, ImageOps
 from django.core.files.uploadedfile import InMemoryUploadedFile
 
 
@@ -28,6 +28,20 @@ class ImageProcessor:
     
     # Whitelist of allowed image formats
     ALLOWED_FORMATS = ['jpg', 'jpeg', 'png', 'webp']
+
+    @staticmethod
+    def _open_oriented_image(image: InMemoryUploadedFile) -> Image.Image:
+        """
+        Open an uploaded image and bake EXIF orientation into the pixel data.
+
+        Mobile cameras often store portrait photos as landscape pixels plus an
+        EXIF orientation flag. We must apply that flag before stripping metadata,
+        otherwise optimized uploads render sideways in clients that no longer
+        have EXIF data to consult.
+        """
+        image.seek(0)
+        pil_image = Image.open(image)
+        return ImageOps.exif_transpose(pil_image)
     
     @classmethod
     def optimize(cls, image: InMemoryUploadedFile) -> InMemoryUploadedFile:
@@ -52,7 +66,7 @@ class ImageProcessor:
         """
         try:
             # Open the image from the uploaded file
-            pil_image = Image.open(image)
+            pil_image = cls._open_oriented_image(image)
             
             # Ensure image is in RGB mode (not RGBA, grayscale, etc.)
             if pil_image.mode in ('RGBA', 'LA', 'P'):
@@ -115,7 +129,7 @@ class ImageProcessor:
         """
         try:
             # Open the image
-            pil_image = Image.open(image)
+            pil_image = cls._open_oriented_image(image)
             
             # Ensure RGB mode
             if pil_image.mode != 'RGB':
@@ -214,7 +228,7 @@ class ImageProcessor:
         """
         try:
             # Open image
-            pil_image = Image.open(image)
+            pil_image = cls._open_oriented_image(image)
             
             # Ensure RGB mode
             if pil_image.mode != 'RGB':

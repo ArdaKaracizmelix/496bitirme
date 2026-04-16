@@ -73,6 +73,32 @@ class SocialService {
   }
 
   /**
+   * Follow a user profile by profile UUID.
+   */
+  async followUser(userId) {
+    try {
+      const response = await api.post(`/user/${userId}/follow/`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error following user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Unfollow a user profile by profile UUID.
+   */
+  async unfollowUser(userId) {
+    try {
+      const response = await api.post(`/user/${userId}/unfollow/`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error unfollowing user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Fetch posts from a specific user (for profile)
    */
   async fetchUserPosts(userId, limit = 10) {

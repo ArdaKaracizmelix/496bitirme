@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 from .models import UserProfile
 from .interest_service import InterestService
 from .serializers import (
+    FollowActionSerializer,
     LoginRequestSerializer,
     LogoutRequestSerializer,
     TokenRefreshRequestSerializer,
@@ -357,11 +358,11 @@ class RegisterView(APIView):
         serializer = UserRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user, _profile, verification_url = AuthService().register_user(serializer, request=request)
-        response_payload = AuthService().generate_tokens(user)
-        response_payload.update({
+        response_payload = {
             "detail": "Registration successful. Please verify your email.",
             "email": user.email,
-        })
+            "requires_verification": True,
+        }
         if settings.DEBUG and verification_url:
             response_payload["verification_url"] = verification_url
         return Response(response_payload, status=status.HTTP_201_CREATED)
@@ -450,7 +451,7 @@ class MeView(APIView):
 
     def get(self,request):
         profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        serializer = UserProfileSerializer(profile)
+        serializer = UserProfileSerializer(profile, context={"request": request})
         return Response(serializer.data)
 
     def patch(self, request):
@@ -537,15 +538,15 @@ class MeView(APIView):
         )
 
 class ProfileView(APIView):
-    #permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self,request,id):
         profile = get_object_or_404(UserProfile,id=id)
-        serializer = UserProfileSerializer(profile)
+        serializer = UserProfileSerializer(profile, context={"request": request})
         return Response(serializer.data)
 
 class FollowView(APIView):
-    #permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def post(self,request,id):
         follower = request.user.profile
@@ -564,14 +565,23 @@ class FollowView(APIView):
             )
 
         follower.follow(followed_profile)
+        follower.refresh_from_db()
+        followed_profile.refresh_from_db()
+        serializer = FollowActionSerializer({
+            "success": True,
+            "message": "Successfully followed",
+            "is_following": True,
+            "followers_count": followed_profile.followers_count,
+            "following_count": follower.following_count,
+        })
         return Response(
-            {"success":True,"message":"Sucessfully followed"},
+            serializer.data,
             status = status.HTTP_200_OK
 
         )
 
 class UnfollowView(APIView):
-    #permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def post(self,request,id):
         follower = request.user.profile
@@ -590,8 +600,17 @@ class UnfollowView(APIView):
             )
 
         follower.unfollow(followed)
+        follower.refresh_from_db()
+        followed.refresh_from_db()
+        serializer = FollowActionSerializer({
+            "success": True,
+            "message": "Successfully unfollowed",
+            "is_following": False,
+            "followers_count": followed.followers_count,
+            "following_count": follower.following_count,
+        })
         return Response(
-            {"success": True, "message": "Sucessfully followed"},
+            serializer.data,
             status=status.HTTP_200_OK
 
         )
