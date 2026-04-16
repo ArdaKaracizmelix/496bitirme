@@ -13,6 +13,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Platform,
   RefreshControl,
   Share,
 } from 'react-native';
@@ -36,6 +37,12 @@ const STATUS_TEXT_COLORS = {
   'ARCHIVED': '#95a5a6',
 };
 
+const TRIP_TABS = {
+  DRAFT: 'DRAFT',
+  ACTIVE: 'ACTIVE',
+  PAST: 'PAST',
+};
+
 export default function SavedTripsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
@@ -45,7 +52,7 @@ export default function SavedTripsScreen({ navigation }) {
   const { data: tripsData, isLoading: tripsLoading, refetch: refetchTrips } = useTrips();
 
   // Local state
-  const [activeTab, setActiveTab] = useState('UPCOMING');
+  const [activeTab, setActiveTab] = useState(TRIP_TABS.ACTIVE);
   const [selectedTrip, setSelectedTrip] = useState(null);
   const [showTripDetails, setShowTripDetails] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -58,22 +65,11 @@ export default function SavedTripsScreen({ navigation }) {
     ? allTrips.filter((trip) => trip?.username === currentUsername)
     : allTrips;
 
-  const isPastTrip = (trip) => {
-    if (trip?.status === 'COMPLETED' || trip?.status === 'ARCHIVED') {
-      return true;
-    }
-    if (!trip?.end_date) {
-      return false;
-    }
-    const endAt = new Date(trip.end_date);
-    if (Number.isNaN(endAt.getTime())) {
-      return false;
-    }
-    return endAt < new Date();
-  };
-
-  const upcomingTrips = ownTrips.filter((trip) => !isPastTrip(trip));
-  const pastTrips = ownTrips.filter(isPastTrip);
+  const draftTrips = ownTrips.filter((trip) => trip?.status === 'DRAFT');
+  const activeTrips = ownTrips.filter((trip) => trip?.status === 'ACTIVE');
+  const pastTrips = ownTrips.filter(
+    (trip) => trip?.status === 'COMPLETED' || trip?.status === 'ARCHIVED'
+  );
 
   /**
    * Handle pull-to-refresh
@@ -156,6 +152,47 @@ export default function SavedTripsScreen({ navigation }) {
       ]
     );
   }, [selectedTrip, store, refetchTrips]);
+
+  /**
+   * Handle marking trip as completed
+   */
+  const handleMarkCompleted = useCallback(async () => {
+    if (!selectedTrip?.id) return;
+
+    const completeTrip = async () => {
+      try {
+        await TripService.updateTrip(selectedTrip.id, { status: 'COMPLETED' });
+        const refreshedTrip = await TripService.fetchTripById(selectedTrip.id);
+        setSelectedTrip(refreshedTrip);
+        setShowTripDetails(false);
+        setShowActionMenu(false);
+        await refetchTrips();
+        setActiveTab(TRIP_TABS.PAST);
+        Alert.alert('Başarılı', 'Rota tamamlandı olarak işaretlendi');
+      } catch (error) {
+        Alert.alert('Hata', error?.message || 'Rota tamamlandı olarak işaretlenemedi');
+      }
+    };
+
+    if (Platform.OS === 'web' && typeof globalThis.confirm === 'function') {
+      const confirmed = globalThis.confirm(
+        'Bu rotayı tamamlandı olarak işaretlemek istiyor musunuz?'
+      );
+      if (confirmed) {
+        await completeTrip();
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Rotayı Tamamla',
+      'Bu rotayı tamamlandı olarak işaretlemek istiyor musunuz?',
+      [
+        { text: 'İptal', style: 'cancel' },
+        { text: 'Tamamla', onPress: completeTrip },
+      ]
+    );
+  }, [selectedTrip, refetchTrips]);
 
   /**
    * Handle sharing trip
@@ -346,14 +383,18 @@ export default function SavedTripsScreen({ navigation }) {
     <View style={styles.emptyState}>
       <Text style={styles.emptyStateEmoji}>🗺️</Text>
       <Text style={styles.emptyStateTitle}>
-        {activeTab === 'UPCOMING' ? 'Yaklaşan rota yok' : 'Geçmiş rota yok'}
+        {activeTab === TRIP_TABS.DRAFT
+          ? 'Taslak rota yok'
+          : activeTab === TRIP_TABS.ACTIVE
+            ? 'Aktif rota yok'
+            : 'Geçmiş rota yok'}
       </Text>
       <Text style={styles.emptyStateSubtext}>
-        {activeTab === 'UPCOMING'
-          ? 'Bir rota oluşturarak başla'
-          : 'Hiç rota tamamlanmadı'}
+        {activeTab === TRIP_TABS.PAST
+          ? 'Hiç rota tamamlanmadı'
+          : 'Bir rota oluşturarak başla'}
       </Text>
-      {activeTab === 'UPCOMING' && (
+      {activeTab !== TRIP_TABS.PAST && (
         <TouchableOpacity
           style={styles.createButton}
           onPress={() => navigation.navigate('IterinaryBuilder')}
@@ -364,7 +405,11 @@ export default function SavedTripsScreen({ navigation }) {
     </View>
   );
 
-  const displayTrips = activeTab === 'UPCOMING' ? upcomingTrips : pastTrips;
+  const displayTrips = activeTab === TRIP_TABS.DRAFT
+    ? draftTrips
+    : activeTab === TRIP_TABS.ACTIVE
+      ? activeTrips
+      : pastTrips;
   const isLoading = tripsLoading;
 
   return (
@@ -387,20 +432,24 @@ export default function SavedTripsScreen({ navigation }) {
 
       {/* Tabs */}
       <View style={styles.tabsContainer}>
-        {['UPCOMING', 'PAST'].map((tab) => (
+        {[
+          { key: TRIP_TABS.DRAFT, label: 'Taslak' },
+          { key: TRIP_TABS.ACTIVE, label: 'Aktif' },
+          { key: TRIP_TABS.PAST, label: 'Geçmiş' },
+        ].map((tab) => (
           <TouchableOpacity
-            key={tab}
+            key={tab.key}
             style={[
               styles.tab,
-              activeTab === tab && styles.tabActive,
+              activeTab === tab.key && styles.tabActive,
             ]}
-            onPress={() => setActiveTab(tab)}
+            onPress={() => setActiveTab(tab.key)}
           >
             <Text style={[
               styles.tabText,
-              activeTab === tab && styles.tabTextActive,
+              activeTab === tab.key && styles.tabTextActive,
             ]}>
-              {tab === 'UPCOMING' ? 'Yaklaşan' : 'Geçmiş'}
+              {tab.label}
             </Text>
           </TouchableOpacity>
         ))}
@@ -532,6 +581,14 @@ export default function SavedTripsScreen({ navigation }) {
               >
                 <Text style={styles.primaryButtonText}>✏️ Düzenle</Text>
               </TouchableOpacity>
+              {selectedTrip?.status === 'ACTIVE' && (
+                <TouchableOpacity
+                  style={styles.successButton}
+                  onPress={handleMarkCompleted}
+                >
+                  <Text style={styles.successButtonText}>✓ Tamamlandı</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={handleShareTrip}
@@ -596,6 +653,18 @@ export default function SavedTripsScreen({ navigation }) {
               <Text style={styles.actionMenuIcon}>📅</Text>
               <Text style={styles.actionMenuText}>Takvime Ekle</Text>
             </TouchableOpacity>
+            {selectedTrip?.status === 'ACTIVE' && (
+              <TouchableOpacity
+                style={styles.actionMenuItem}
+                onPress={() => {
+                  handleMarkCompleted();
+                  setShowActionMenu(false);
+                }}
+              >
+                <Text style={styles.actionMenuIcon}>✅</Text>
+                <Text style={styles.actionMenuText}>Tamamlandı Olarak İşaretle</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.actionMenuItem, styles.actionMenuItemDanger]}
               onPress={() => {
@@ -998,5 +1067,19 @@ const styles = StyleSheet.create({
   },
   actionMenuTextDanger: {
     color: '#e74c3c',
+  },
+  successButton: {
+    flex: 1,
+    backgroundColor: '#e8f5e9',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#27ae60',
+  },
+  successButtonText: {
+    color: '#1f7a3f',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

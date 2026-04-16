@@ -303,6 +303,67 @@ class ItineraryAPITest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('error', response.data)
 
+    def test_generate_from_preferences_reuses_latest_draft(self):
+        """Test generation updates latest draft instead of creating duplicate drafts."""
+        old_trip = Itinerary.objects.create(
+            user=self.user,
+            title='Old Draft',
+            start_date=timezone.now(),
+            end_date=timezone.now() + timedelta(days=1),
+            status=Itinerary.Status.DRAFT,
+            visibility=Itinerary.Visibility.PRIVATE,
+            transport_mode=Itinerary.TransportMode.DRIVING,
+        )
+
+        old_poi = POI.objects.create(
+            name='Old Stop',
+            address='Besiktas, Istanbul',
+            location=Point(29.0000, 41.0500),
+            category=POI.Category.HISTORICAL,
+            average_rating=4.2,
+            tags=['istanbul', 'historical'],
+        )
+        ItineraryItem.objects.create(itinerary=old_trip, poi=old_poi, order_index=0)
+
+        POI.objects.create(
+            name='New Stop 1',
+            address='Kadikoy, Istanbul',
+            location=Point(29.0300, 40.9920),
+            category=POI.Category.FOOD,
+            average_rating=4.8,
+            tags=['istanbul', 'food'],
+        )
+        POI.objects.create(
+            name='New Stop 2',
+            address='Uskudar, Istanbul',
+            location=Point(29.0150, 41.0220),
+            category=POI.Category.NATURE,
+            average_rating=4.6,
+            tags=['istanbul', 'nature'],
+        )
+
+        url = reverse('trips:itinerary-generate-from-preferences')
+        response = self.client.post(
+            url,
+            {
+                'city': 'Istanbul',
+                'duration_days': 1,
+                'interests': ['food', 'nature'],
+                'stops_per_day': 2,
+                'title': 'Updated Draft',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Itinerary.objects.filter(user=self.user).count(), 1)
+
+        old_trip.refresh_from_db()
+        self.assertEqual(str(response.data['itinerary']['id']), str(old_trip.id))
+        self.assertEqual(old_trip.title, 'Updated Draft')
+        self.assertEqual(old_trip.status, Itinerary.Status.DRAFT)
+        self.assertEqual(ItineraryItem.objects.filter(itinerary=old_trip).count(), 2)
+
 
 class ItineraryItemAPITest(APITestCase):
     """Test cases for ItineraryItem API endpoints"""

@@ -557,15 +557,43 @@ class TripGenerationService:
             start_dt = timezone.make_aware(start_dt)
             end_dt = timezone.make_aware(end_dt)
 
-        itinerary = Itinerary.objects.create(
-            user=user,
-            title=title,
-            start_date=start_dt,
-            end_date=end_dt,
-            visibility=visibility,
-            transport_mode=transport_mode,
-            status=Itinerary.Status.DRAFT,
+        itinerary = (
+            Itinerary.objects
+            .filter(user=user, status=Itinerary.Status.DRAFT)
+            .order_by('-updated_at', '-created_at')
+            .first()
         )
+        reused_draft = itinerary is not None
+
+        if itinerary is None:
+            itinerary = Itinerary.objects.create(
+                user=user,
+                title=title,
+                start_date=start_dt,
+                end_date=end_dt,
+                visibility=visibility,
+                transport_mode=transport_mode,
+                status=Itinerary.Status.DRAFT,
+            )
+        else:
+            itinerary.title = title
+            itinerary.start_date = start_dt
+            itinerary.end_date = end_dt
+            itinerary.visibility = visibility
+            itinerary.transport_mode = transport_mode
+            itinerary.status = Itinerary.Status.DRAFT
+            itinerary.save(
+                update_fields=[
+                    'title',
+                    'start_date',
+                    'end_date',
+                    'visibility',
+                    'transport_mode',
+                    'status',
+                    'updated_at',
+                ]
+            )
+            itinerary.itineraryitem_set.all().delete()
 
         hour_slots = [9, 11, 14, 17, 19, 20, 21, 22]
         day_plan: List[Dict[str, Any]] = []
@@ -602,4 +630,5 @@ class TripGenerationService:
             'selected_pois_count': len(selected_pois),
             'candidate_pois_count': len(candidates),
             'day_plan': day_plan,
+            'reused_draft': reused_draft,
         }
