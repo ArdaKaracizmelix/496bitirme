@@ -16,6 +16,7 @@ from .models import UserProfile
 from .interest_service import InterestService
 from .serializers import (
     FollowActionSerializer,
+    FollowListItemSerializer,
     LoginRequestSerializer,
     LogoutRequestSerializer,
     TokenRefreshRequestSerializer,
@@ -613,6 +614,46 @@ class UnfollowView(APIView):
             serializer.data,
             status=status.HTTP_200_OK
 
+        )
+
+
+class FollowersListView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, id):
+        profile = get_object_or_404(UserProfile, id=id)
+        followers = (
+            UserProfile.objects.filter(following_relation__following=profile)
+            .select_related("user")
+            .order_by("-following_relation__created_at")
+        )
+        serializer = FollowListItemSerializer(followers, many=True)
+        return Response(
+            {
+                "count": followers.count(),
+                "results": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class FollowingListView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, id):
+        profile = get_object_or_404(UserProfile, id=id)
+        following = (
+            UserProfile.objects.filter(follower_relation__follower=profile)
+            .select_related("user")
+            .order_by("-follower_relation__created_at")
+        )
+        serializer = FollowListItemSerializer(following, many=True)
+        return Response(
+            {
+                "count": following.count(),
+                "results": serializer.data,
+            },
+            status=status.HTTP_200_OK,
         )
 
 

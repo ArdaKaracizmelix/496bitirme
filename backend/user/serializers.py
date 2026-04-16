@@ -70,6 +70,26 @@ class FollowActionSerializer(serializers.Serializer):
     following_count = serializers.IntegerField()
 
 
+class FollowListItemSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source="user.username", read_only=True)
+    full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserProfile
+        fields = [
+            "id",
+            "username",
+            "full_name",
+            "avatar_url",
+            "is_verified",
+            "followers_count",
+            "following_count",
+        ]
+
+    def get_full_name(self, obj):
+        return f"{obj.user.first_name} {obj.user.last_name}".strip() or obj.user.username
+
+
 class LoginRequestSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
     password = serializers.CharField(required=True, write_only=True)

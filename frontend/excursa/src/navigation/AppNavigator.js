@@ -18,6 +18,7 @@ import CreatePostScreen from '../screens/CreatePostScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import PostDetailScreen from '../screens/PostDetailScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
+import FollowListScreen from '../screens/FollowListScreen';
 
 import useAuthStore from '../store/authStore';
 
@@ -102,8 +103,22 @@ function ProfileStack() {
         component={ProfileScreen}
       />
       <Stack.Screen
+        name="UserProfile"
+        component={ProfileScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+      <Stack.Screen
         name="EditProfile"
         component={EditProfileScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="FollowList"
+        component={FollowListScreen}
         options={{
           animationEnabled: true,
         }}
@@ -175,6 +190,13 @@ function SocialStack() {
       <Stack.Screen 
         name="EditPost" 
         component={CreatePostScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="FollowList"
+        component={FollowListScreen}
         options={{
           animationEnabled: true,
         }}

@@ -144,6 +144,28 @@ class UserAPITests(APITestCase):
         self.profile1.refresh_from_db()
         self.assertEqual(self.profile1.following_count, 0)
 
+    def test_followers_list_endpoint(self):
+        """Test listing followers for a profile."""
+        self.profile1.follow(self.profile2)
+
+        url = reverse('followers_list', args=[self.profile2.id])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], str(self.profile1.id))
+
+    def test_following_list_endpoint(self):
+        """Test listing profiles followed by a user."""
+        self.profile1.follow(self.profile2)
+
+        url = reverse('following_list', args=[self.profile1.id])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], str(self.profile2.id))
+
 
 class EmailVerificationAuthTests(APITestCase):
     @patch("user.services.EmailService.send", return_value=True)

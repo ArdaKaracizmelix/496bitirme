@@ -140,6 +140,14 @@ export default function ProfileScreen({ route }) {
     Alert.alert('Bilgi', 'Mesajlasma ekrani yakinda gelecek.');
   };
 
+  const handleOpenFollowList = (listType) => {
+    if (!userId) return;
+    navigation.navigate('FollowList', {
+      userId,
+      listType,
+    });
+  };
+
   const renderHeader = () => (
     <View style={styles.headerContainer}>
       <View style={styles.topSection}>
@@ -149,14 +157,22 @@ export default function ProfileScreen({ route }) {
             <Text style={styles.statNumber}>{postsCount}</Text>
             <Text style={styles.statLabel}>Gonderi</Text>
           </View>
-          <View style={styles.stat}>
+          <TouchableOpacity
+            style={styles.stat}
+            onPress={() => handleOpenFollowList('followers')}
+            activeOpacity={0.7}
+          >
             <Text style={styles.statNumber}>{userProfile.followers_count}</Text>
             <Text style={styles.statLabel}>Takipci</Text>
-          </View>
-          <View style={styles.stat}>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.stat}
+            onPress={() => handleOpenFollowList('following')}
+            activeOpacity={0.7}
+          >
             <Text style={styles.statNumber}>{userProfile.following_count}</Text>
             <Text style={styles.statLabel}>Takip</Text>
-          </View>
+          </TouchableOpacity>
         </View>
       </View>
 

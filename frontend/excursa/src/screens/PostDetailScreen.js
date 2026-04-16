@@ -121,9 +121,24 @@ export default function PostDetailScreen() {
     }
   };
 
+  const goToUserProfile = (user) => {
+    const ownerId =
+      user?.user_ref_id ||
+      user?.user_id ||
+      user?.profile_id ||
+      user?.id;
+    if (!ownerId) return;
+
+    navigation.navigate('UserProfile', {
+      userId: ownerId,
+      full_name: user?.user_name || user?.full_name,
+      avatar_url: user?.avatar_url,
+    });
+  };
+
   const renderPostHeader = () => (
     <View style={[styles.postCard, { maxWidth: contentMaxWidth }]}>
-      <View style={styles.ownerRow}>
+      <Pressable style={styles.ownerRow} onPress={() => goToUserProfile(post)}>
         <Image
           source={{ uri: post?.avatar_url || FALLBACK_AVATAR }}
           style={styles.ownerAvatar}
@@ -136,7 +151,7 @@ export default function PostDetailScreen() {
             {post?.location ? post.location : 'Excursa seyahat akisi'} · {formatTimeAgo(post?.created_at)}
           </Text>
         </View>
-      </View>
+      </Pressable>
 
       {hasMedia ? (
         <View style={styles.mediaStack}>
@@ -186,15 +201,19 @@ export default function PostDetailScreen() {
 
   const renderComment = ({ item, index }) => (
     <View style={styles.commentItem}>
-      <Image
-        source={{ uri: item?.avatar_url || FALLBACK_AVATAR }}
-        style={styles.commentAvatar}
-      />
+      <TouchableOpacity onPress={() => goToUserProfile(item)}>
+        <Image
+          source={{ uri: item?.avatar_url || FALLBACK_AVATAR }}
+          style={styles.commentAvatar}
+        />
+      </TouchableOpacity>
       <View style={styles.commentBubble}>
         <View style={styles.commentHeader}>
-          <Text style={styles.commentAuthor} numberOfLines={1}>
-            {item?.user_name || 'Gezgin'}
-          </Text>
+          <TouchableOpacity style={styles.commentAuthorPress} onPress={() => goToUserProfile(item)}>
+            <Text style={styles.commentAuthor} numberOfLines={1}>
+              {item?.user_name || 'Gezgin'}
+            </Text>
+          </TouchableOpacity>
           <Text style={styles.commentTime}>{formatTimeAgo(item?.timestamp)}</Text>
         </View>
         <Text style={styles.commentText}>{item?.text}</Text>
@@ -559,10 +578,13 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   commentAuthor: {
-    flex: 1,
     color: '#1a1a2e',
     fontSize: 13,
     fontWeight: '900',
+  },
+  commentAuthorPress: {
+    flex: 1,
+    alignSelf: 'flex-start',
   },
   commentTime: {
     color: '#9a9184',

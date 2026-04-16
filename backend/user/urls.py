@@ -1,7 +1,9 @@
 from django.urls import path
 
 from .views import (
+    FollowersListView,
     FollowView,
+    FollowingListView,
     InterestAvailableView,
     InterestSourceHealthView,
     InterestSubmitView,
@@ -26,6 +28,8 @@ urlpatterns = [
     path("interests/", InterestSubmitView.as_view(), name="interests"),
     path("me/", MeView.as_view(), name="me"),
     path("<uuid:id>/", ProfileView.as_view(), name="profile"),
+    path("<uuid:id>/followers/", FollowersListView.as_view(), name="followers_list"),
+    path("<uuid:id>/following/", FollowingListView.as_view(), name="following_list"),
     path("<uuid:id>/follow/", FollowView.as_view(), name="follow"),
     path("<uuid:id>/unfollow/", UnfollowView.as_view(), name="unfollow"),
 ]

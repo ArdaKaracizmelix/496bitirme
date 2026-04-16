@@ -164,6 +164,21 @@ export const useUserPosts = (userId) => {
 };
 
 /**
+ * Hook: Fetch followers or following list for a user profile.
+ */
+export const useUserFollowList = (userId, listType = 'followers') => {
+  return useQuery({
+    queryKey: ['userFollowList', userId, listType],
+    queryFn: () =>
+      listType === 'following'
+        ? SocialService.fetchFollowing(userId)
+        : SocialService.fetchFollowers(userId),
+    enabled: !!userId,
+    staleTime: 60 * 1000,
+  });
+};
+
+/**
  * Hook: Fetch comments for a post with infinite scroll
  */
 export const usePostComments = (postId) => {
