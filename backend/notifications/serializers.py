@@ -9,6 +9,11 @@ class NotificationSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True
     )
+    actor_avatar_url = serializers.URLField(
+        source='actor.avatar_url',
+        read_only=True,
+        allow_null=True
+    )
     actor_id = serializers.UUIDField(
         source='actor.id',
         read_only=True,
@@ -27,10 +32,13 @@ class NotificationSerializer(serializers.ModelSerializer):
             'recipient_id',
             'actor_id',
             'actor_name',
+            'actor_avatar_url',
             'verb',
+            'category',
             'title',
             'body',
             'target_object_id',
+            'target_object_ref',
             'is_read',
             'data',
             'deep_link',
@@ -45,6 +53,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             'recipient_id',
             'actor_name',
             'actor_id',
+            'actor_avatar_url',
         ]
     
     def get_deep_link(self, obj):
@@ -61,9 +70,11 @@ class NotificationCreateSerializer(serializers.ModelSerializer):
             'recipient',
             'actor',
             'verb',
+            'category',
             'title',
             'body',
             'target_object_id',
+            'target_object_ref',
             'data',
         ]
     
@@ -77,25 +88,46 @@ class NotificationCreateSerializer(serializers.ModelSerializer):
 
 
 class NotificationListSerializer(serializers.ModelSerializer):
-    """Simplified serializer for listing notifications"""
+    """Product-ready serializer for the notification center list."""
+    actor_id = serializers.UUIDField(
+        source='actor.id',
+        read_only=True,
+        allow_null=True
+    )
     actor_name = serializers.CharField(
         source='actor.user.username',
         read_only=True,
         allow_null=True
     )
+    actor_avatar_url = serializers.URLField(
+        source='actor.avatar_url',
+        read_only=True,
+        allow_null=True
+    )
+    deep_link = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = Notification
         fields = [
             'id',
             'verb',
+            'category',
             'title',
             'body',
+            'actor_id',
             'actor_name',
+            'actor_avatar_url',
+            'target_object_id',
+            'target_object_ref',
             'is_read',
+            'data',
+            'deep_link',
             'created_at',
         ]
         read_only_fields = fields
+
+    def get_deep_link(self, obj):
+        return obj.get_deep_link()
 
 
 class DeviceTokenSerializer(serializers.ModelSerializer):

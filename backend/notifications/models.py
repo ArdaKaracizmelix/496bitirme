@@ -8,9 +8,26 @@ class NotificationVerb(models.TextChoices):
     """Enumeration for notification types/actions"""
     LIKE = 'LIKE', 'Like'
     COMMENT = 'COMMENT', 'Comment'
+    POST_LIKE = 'POST_LIKE', 'Post Like'
+    POST_COMMENT = 'POST_COMMENT', 'Post Comment'
+    POST_SAVE = 'POST_SAVE', 'Post Save'
+    COMMENT_LIKE = 'COMMENT_LIKE', 'Comment Like'
+    COMMENT_REPLY = 'COMMENT_REPLY', 'Comment Reply'
     FOLLOW = 'FOLLOW', 'Follow'
+    ROUTE_LIKE = 'ROUTE_LIKE', 'Route Like'
+    ROUTE_COMMENT = 'ROUTE_COMMENT', 'Route Comment'
+    ROUTE_SAVE = 'ROUTE_SAVE', 'Route Save'
     TRIP_INVITE = 'TRIP_INVITE', 'Trip Invite'
+    WELCOME = 'WELCOME', 'Welcome'
+    EMAIL_VERIFICATION = 'EMAIL_VERIFICATION', 'Email Verification'
     SYSTEM_ALERT = 'SYSTEM_ALERT', 'System Alert'
+
+
+class NotificationCategory(models.TextChoices):
+    """High-level buckets used by the notification center UI."""
+    ACTIVITY = 'ACTIVITY', 'Activity'
+    ROUTES = 'ROUTES', 'Routes'
+    SYSTEM = 'SYSTEM', 'System'
 
 
 class DevicePlatform(models.TextChoices):
@@ -46,9 +63,16 @@ class Notification(models.Model):
     
     # Type of action
     verb = models.CharField(
-        max_length=20,
+        max_length=32,
         choices=NotificationVerb.choices,
-        help_text="Type of notification: LIKE, COMMENT, FOLLOW, TRIP_INVITE, SYSTEM_ALERT"
+        help_text="Event verb that describes why the notification was created"
+    )
+
+    category = models.CharField(
+        max_length=20,
+        choices=NotificationCategory.choices,
+        default=NotificationCategory.ACTIVITY,
+        help_text="UI category bucket for filtering and presentation"
     )
     
     # Header text
@@ -59,6 +83,12 @@ class Notification(models.Model):
     
     # The ID of the related object (Post ID, Trip ID, etc.) used for deep linking
     target_object_id = models.UUIDField(null=True, blank=True)
+
+    # Mongo ObjectIds and other external ids are not UUIDs, so keep a stable string ref too.
+    target_object_ref = models.CharField(max_length=128, blank=True, default='')
+
+    # Optional idempotency key for preventing duplicate notifications.
+    dedupe_key = models.CharField(max_length=255, blank=True, default='', db_index=True)
     
     # Status flag
     is_read = models.BooleanField(default=False)
@@ -75,6 +105,8 @@ class Notification(models.Model):
         indexes = [
             models.Index(fields=['recipient', 'created_at']),
             models.Index(fields=['recipient', 'is_read']),
+            models.Index(fields=['recipient', 'category', 'created_at']),
+            models.Index(fields=['recipient', 'verb', 'target_object_ref']),
             models.Index(fields=['created_at']),
         ]
         ordering = ['-created_at']
@@ -92,16 +124,29 @@ class Notification(models.Model):
         Constructs the mobile app schema URL based on the verb and target_object_id.
         Used for deep linking in mobile apps.
         """
-        if not self.target_object_id:
+        explicit_link = self.data.get('deep_link') if isinstance(self.data, dict) else None
+        if explicit_link:
+            return explicit_link
+
+        target = self.target_object_ref or self.target_object_id
+        if not target:
             return None
         
         # Map verb to deep link schema
         deep_link_map = {
-            NotificationVerb.LIKE: f'excursa://notification/like/{self.target_object_id}',
-            NotificationVerb.COMMENT: f'excursa://notification/comment/{self.target_object_id}',
+            NotificationVerb.LIKE: f'excursa://post/{target}',
+            NotificationVerb.COMMENT: f'excursa://post/{target}',
+            NotificationVerb.POST_LIKE: f'excursa://post/{target}',
+            NotificationVerb.POST_COMMENT: f'excursa://post/{target}',
+            NotificationVerb.POST_SAVE: f'excursa://post/{target}',
+            NotificationVerb.ROUTE_LIKE: f'excursa://post/{target}',
+            NotificationVerb.ROUTE_COMMENT: f'excursa://post/{target}',
+            NotificationVerb.ROUTE_SAVE: f'excursa://post/{target}',
             NotificationVerb.FOLLOW: f'excursa://profile/{self.actor.id if self.actor else ""}',
-            NotificationVerb.TRIP_INVITE: f'excursa://trip/{self.target_object_id}',
-            NotificationVerb.SYSTEM_ALERT: f'excursa://alert/{self.target_object_id}',
+            NotificationVerb.TRIP_INVITE: f'excursa://trip/{target}',
+            NotificationVerb.WELCOME: 'excursa://notifications',
+            NotificationVerb.EMAIL_VERIFICATION: 'excursa://profile',
+            NotificationVerb.SYSTEM_ALERT: f'excursa://alert/{target}',
         }
         
         return deep_link_map.get(self.verb)

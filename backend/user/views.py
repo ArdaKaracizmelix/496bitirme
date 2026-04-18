@@ -425,6 +425,9 @@ class VerifyEmailView(APIView):
 
         profile.is_verified = True
         profile.save(update_fields=["is_verified"])
+        from notifications.services import NotificationService
+
+        NotificationService.notify_welcome(profile)
 
         return Response(
             {"detail": "Email verified successfully. You can now log in."},
@@ -568,6 +571,9 @@ class FollowView(APIView):
         follower.follow(followed_profile)
         follower.refresh_from_db()
         followed_profile.refresh_from_db()
+        from notifications.services import NotificationService
+
+        NotificationService.notify_follow(follower, followed_profile)
         serializer = FollowActionSerializer({
             "success": True,
             "message": "Successfully followed",

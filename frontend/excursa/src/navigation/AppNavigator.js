@@ -19,6 +19,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import PostDetailScreen from '../screens/PostDetailScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
 import FollowersListScreen from '../screens/FollowersListScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
 
 import useAuthStore from '../store/authStore';
 
@@ -37,6 +38,7 @@ const linking = {
       Trips: 'trips',
       Chatbot: 'chatbot',
       Profile: 'profile',
+      Notifications: 'notifications',
     },
   },
 };
@@ -176,6 +178,13 @@ function SocialStack() {
       <Stack.Screen 
         name="PostDetail" 
         component={PostDetailScreen}
+        options={{
+          animationEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={NotificationsScreen}
         options={{
           animationEnabled: true,
         }}
