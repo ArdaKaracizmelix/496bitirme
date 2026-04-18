@@ -60,6 +60,20 @@ const useAuthStore = create((set, get) => ({
   },
 
   /**
+   * Permanently delete account and clear authentication state.
+   */
+  deleteAccount: async () => {
+    await AuthManager.deleteAccount();
+    clearUserScopedCache();
+    global.accessToken = null;
+    set({
+      user: null,
+      token: null,
+      isAuthenticated: false,
+    });
+  },
+
+  /**
    * Initialize authentication state from persistent storage
    * Called on app launch
    */

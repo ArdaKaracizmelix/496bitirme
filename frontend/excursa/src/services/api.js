@@ -126,7 +126,12 @@ api.interceptors.request.use(async (config) => {
   config.headers = config.headers || {};
 
   // Let axios/runtime set multipart boundaries for FormData payloads.
-  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+  const isMultipartPayload =
+    config?.forceMultipart === true ||
+    (typeof FormData !== 'undefined' && config.data instanceof FormData) ||
+    !!(config?.data && typeof config.data === 'object' && Array.isArray(config.data._parts));
+
+  if (isMultipartPayload) {
     if (config.headers['Content-Type']) {
       delete config.headers['Content-Type'];
     }

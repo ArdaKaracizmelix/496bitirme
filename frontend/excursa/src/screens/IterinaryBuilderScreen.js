@@ -42,6 +42,8 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { tripId } = route.params || {};
   const user = useAuthStore((state) => state.user);
+  const loadTrip = useTripStore((state) => state.loadTrip);
+  const clearCurrentTrip = useTripStore((state) => state.clearCurrentTrip);
 
   // Trip Store
   const store = useTripStore();
@@ -72,18 +74,32 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
   // Load trip if ID provided
   useEffect(() => {
     if (tripId) {
-      store.loadTrip(tripId);
+      loadTrip(tripId);
+      return;
     }
-  }, [tripId]);
+
+    // Creating a new trip must start from a clean slate, not previous draft/edit data.
+    clearCurrentTrip();
+    setTripTitle('');
+    setTripDate('');
+    setTransportMode('DRIVING');
+    setCityQuery('');
+    setSelectedCity('');
+    setCitySuggestions([]);
+    setShowCitySuggestions(false);
+    setAiDurationDays('3');
+    setAiStopsPerDay('4');
+  }, [tripId, loadTrip, clearCurrentTrip]);
 
   // Update local state when trip loads
   useEffect(() => {
-    if (currentTrip) {
+    // Only hydrate local form fields from store when editing an existing trip.
+    if (tripId && currentTrip) {
       setTripTitle(currentTrip.title || '');
       setTripDate(currentTrip.start_date ? currentTrip.start_date.slice(0, 10) : '');
       setTransportMode(currentTrip.transport_mode || 'DRIVING');
     }
-  }, [currentTrip]);
+  }, [tripId, currentTrip]);
 
   const loadCitySuggestions = useCallback(async (queryText) => {
     setIsCityLoading(true);
@@ -177,6 +193,7 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
       const result = await store.generateTripFromPreferences({
         city,
         duration_days: durationDays,
+        interests: userInterests,
         start_date: tripDate || undefined,
         title: tripTitle.trim() || undefined,
         visibility: 'PRIVATE',

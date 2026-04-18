@@ -2,6 +2,10 @@ from abc import ABC, abstractmethod
 from typing import List, Tuple, Dict, Any
 from enum import Enum
 import math
+import json
+import re
+import hashlib
+from difflib import SequenceMatcher
 from datetime import datetime, timedelta, time
 import logging
 import requests
@@ -194,6 +198,63 @@ class TripGenerationService:
         'FOOD': {'food', 'restaurant', 'cafe', 'bar', 'bakery', 'coffee_shop', 'meal_takeaway', 'meal_delivery', 'ice_cream_shop'},
         'ENTERTAINMENT': {'entertainment', 'movie_theater', 'night_club', 'amusement_park', 'stadium', 'shopping_mall', 'theater', 'performing_arts_theater'},
     }
+    _EXCLUDED_TAGS_FOR_ITINERARY = {
+        'hospital',
+        'pharmacy',
+        'school',
+        'university',
+        'doctor',
+        'dentist',
+        'medical_center',
+        'health',
+        'parking',
+        'transit_station',
+        'locality',
+        'political',
+    }
+    _EXCLUDED_CATEGORIES_FOR_ITINERARY = {
+        'HEALTH_AND_WELLNESS',
+        'HEALTH',
+        'TRANSPORTATION',
+    }
+    _BAD_NAME_PHRASES = {
+        'maybe',
+        'not sure',
+        'could use',
+        'but uncertain',
+        'might not be accurate',
+        'we need',
+        'real poi',
+        's search memory',
+        'analysis',
+        'output a travel itinerary',
+        'ensure no duplicates',
+        'pick real',
+        'let\'s pick',
+        'let\'s list',
+        'let\'s gather',
+        'need to pick',
+        'need real',
+        'actually',
+        'but maybe',
+        'alternatively',
+        'duplicate',
+        'gather coordinates',
+        'find address',
+        'address unknown',
+        'realistic',
+        'distinct',
+        'provide 12',
+        'provide 4',
+        'provide name',
+        'let\'s provide',
+        'provide lat',
+        'provide 12 lines',
+        'needs 12',
+        'for example',
+        'such as',
+        'instead of',
+    }
 
     @staticmethod
     def _normalize_interests(interests: List[str]) -> List[str]:
@@ -309,6 +370,1081 @@ class TripGenerationService:
                 selected_ids.add(poi.id)
 
         return selected
+
+    @staticmethod
+    def _build_llm_client():
+        try:
+            from ai_service.services.llm_client import LLMClient
+            return LLMClient()
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_json_object(text: str) -> Dict[str, Any]:
+        payload = str(text or '').strip()
+        if not payload:
+            return {}
+
+        if payload.startswith("```"):
+            payload = payload.strip("`")
+            if payload.lower().startswith("json"):
+                payload = payload[4:].strip()
+
+        try:
+            parsed = json.loads(payload)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            pass
+
+        match = re.search(r"\{[\s\S]*\}", payload)
+        if not match:
+            return {}
+
+        try:
+            parsed = json.loads(match.group(0))
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _coerce_int_list(values: Any) -> List[int]:
+        if not isinstance(values, list):
+            return []
+        parsed = []
+        for item in values:
+            try:
+                parsed.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return parsed
+
+    @staticmethod
+    def _normalize_text(value: str) -> str:
+        return re.sub(r'\s+', ' ', str(value or '').strip().lower())
+
+    @classmethod
+    def _extract_indices_from_parsed_response(cls, parsed: Dict[str, Any], candidate_pool: List[POI]) -> List[int]:
+        candidate_names = {
+            cls._normalize_text(poi.name): idx
+            for idx, poi in enumerate(candidate_pool)
+        }
+
+        keys = ['ordered_indices', 'ordered_indexes', 'poi_indices', 'itinerary_indices']
+        ordered_indices: List[int] = []
+
+        for key in keys:
+            ordered_indices = cls._coerce_int_list(parsed.get(key))
+            if ordered_indices:
+                return ordered_indices
+
+        # Backward compatibility: ordered_poi_ids
+        ordered_ids_raw = parsed.get('ordered_poi_ids')
+        if isinstance(ordered_ids_raw, list):
+            candidate_map_by_id = {str(poi.id): idx for idx, poi in enumerate(candidate_pool)}
+            seen = set()
+            for item in ordered_ids_raw:
+                key = str(item).strip()
+                idx = candidate_map_by_id.get(key)
+                if idx is None or idx in seen:
+                    continue
+                ordered_indices.append(idx)
+                seen.add(idx)
+            if ordered_indices:
+                return ordered_indices
+
+        # Nested format support: {"days":[{"stops":[...]}]}
+        days = parsed.get('days')
+        if isinstance(days, list):
+            seen = set()
+            for day in days:
+                if not isinstance(day, dict):
+                    continue
+                stops = day.get('stops')
+                if not isinstance(stops, list):
+                    continue
+                for stop in stops:
+                    idx = None
+                    if isinstance(stop, dict):
+                        if stop.get('index') is not None:
+                            try:
+                                idx = int(stop.get('index'))
+                            except (TypeError, ValueError):
+                                idx = None
+                        elif stop.get('candidate_index') is not None:
+                            try:
+                                idx = int(stop.get('candidate_index'))
+                            except (TypeError, ValueError):
+                                idx = None
+                        elif stop.get('name'):
+                            idx = candidate_names.get(cls._normalize_text(stop.get('name')))
+                    elif isinstance(stop, (int, float, str)):
+                        try:
+                            idx = int(stop)
+                        except (TypeError, ValueError):
+                            idx = candidate_names.get(cls._normalize_text(stop))
+
+                    if idx is None or idx in seen:
+                        continue
+                    seen.add(idx)
+                    ordered_indices.append(idx)
+            if ordered_indices:
+                return ordered_indices
+
+        # Name-only list support: {"ordered_poi_names":["..."]}
+        name_keys = ['ordered_poi_names', 'ordered_names', 'poi_names']
+        for key in name_keys:
+            names = parsed.get(key)
+            if not isinstance(names, list):
+                continue
+            seen = set()
+            indices = []
+            for name in names:
+                idx = candidate_names.get(cls._normalize_text(name))
+                if idx is None or idx in seen:
+                    continue
+                seen.add(idx)
+                indices.append(idx)
+            if indices:
+                return indices
+
+        return []
+
+    @staticmethod
+    def _extract_indices_from_text(text: str, candidate_count: int) -> List[int]:
+        values = re.findall(r'\d+', str(text or ''))
+        if not values:
+            return []
+        seen = set()
+        parsed = []
+        for item in values:
+            idx = int(item)
+            if idx < 0 or idx >= candidate_count or idx in seen:
+                continue
+            seen.add(idx)
+            parsed.append(idx)
+        return parsed
+
+    @staticmethod
+    def _extract_piped_poi_entries(text: str) -> List[Dict[str, Any]]:
+        """Parse pipe-delimited POI format: <name> | <address or empty> | <lat,lon or empty> | day <n>
+        
+        STRICT: Only accept lines with proper pipe separation.
+        Format: <name> | <address> | <lat,lon> | day <n>
+        """
+        entries = []
+        seen_names = set()
+        
+        for line in str(text or '').splitlines():
+            clean_line = re.sub(r'\s+', ' ', line).strip()
+            if not clean_line or clean_line.count('|') < 2:
+                continue
+            
+            # Strict regex to ensure proper pipe format
+            # Pattern: text | text | optional_coords | optional_day
+            pattern = r'^(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+)$|^(.+?)\s*\|\s*(.+?)\s*\|\s*(.+)$'
+            match = re.match(pattern, clean_line)
+            if not match:
+                continue
+            
+            # Extract from groups
+            if match.group(1):  # Full 4-part format
+                name = match.group(1).strip()
+                address = match.group(2).strip()
+                coords = match.group(3).strip()
+                day_str = match.group(4).strip()
+            else:  # 3-part format (missing day)
+                name = match.group(5).strip()
+                address = match.group(6).strip()
+                coords = match.group(7).strip()
+                day_str = ""
+            
+            # Validate name: not a meta-text fragment
+            name = re.sub(r'^\s*[-*•#\d\.\)\(]+\s*', '', name).strip()
+            if len(name) < 3:
+                continue
+            
+            # Reject obvious fragments and meta-text
+            if re.match(r'^[a-z]\s+', name):  # Single letter prefix
+                continue
+            if any(word in name.lower() for word in ('ensure', 'pick', 'provide', 'need', 'let', 'gather', 'but ', 'maybe')):
+                continue
+            
+            key = name.lower()
+            if key in seen_names:
+                continue
+            
+            # Parse coordinates if present
+            lat, lon = None, None
+            if coords and coords not in ('', 'empty', 'unknown'):
+                coord_match = re.search(r'(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)', coords)
+                if coord_match:
+                    try:
+                        lat = float(coord_match.group(1))
+                        lon = float(coord_match.group(2))
+                    except (ValueError, AttributeError):
+                        pass
+            
+            # Parse day number
+            day = None
+            if day_str:
+                day_match = re.search(r'day\s*(\d+)', day_str, re.IGNORECASE)
+                if day_match:
+                    try:
+                        day = int(day_match.group(1))
+                    except ValueError:
+                        pass
+            
+            seen_names.add(key)
+            entries.append({
+                'name': name,
+                'address': address if address not in ('', 'empty', 'unknown') else "",
+                'latitude': lat,
+                'longitude': lon,
+                'day': day,
+            })
+        
+        return entries
+
+    @staticmethod
+    def _extract_names_from_text(text: str) -> List[str]:
+        text_value = str(text or '')
+
+        # FIRST: Direct pipe-delimited format with strict regex - highest priority
+        # This catches lines like: "Galata Tower | Galata, Istanbul | 41.0250,28.9820 | day 1"
+        piped_names = []
+        seen_piped = set()
+        
+        # Strict regex pattern for piped format: name | address | coords | day
+        piped_pattern = r'^(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(?:day\s*)?(\d+)'
+        for line in text_value.splitlines():
+            clean_line = re.sub(r'\s+', ' ', line).strip()
+            if not clean_line:
+                continue
+            
+            # Try strict piped format first
+            match = re.match(piped_pattern, clean_line, re.IGNORECASE)
+            if match:
+                candidate = match.group(1).strip()
+                candidate = re.sub(r'^\s*[-*•#\d\.\)\(]+\s*', '', candidate).strip()
+                
+                if len(candidate) < 3:
+                    continue
+                
+                # Reject obvious fragments/meta-text
+                if re.match(r'^[a-z]\s+', candidate):
+                    continue
+                
+                key = candidate.lower()
+                if key in seen_piped:
+                    continue
+                
+                seen_piped.add(key)
+                piped_names.append(candidate)
+        
+        if piped_names:
+            return piped_names
+
+        # FALLBACK: Direct pipe-delimited format without strict regex (more lenient)
+        # This catches lines like: "Name | address | coords"
+        piped_names_lenient = []
+        seen_piped_len = set()
+        for line in text_value.splitlines():
+            clean_line = re.sub(r'\s+', ' ', line).strip()
+            if not clean_line or '|' not in clean_line:
+                continue
+            candidate = clean_line.split('|', 1)[0].strip()
+            candidate = re.sub(r'^\s*[-*•#\d\.\)\(]+\s*', '', candidate).strip()
+            candidate = re.sub(r'[.,;:\s]+$', '', candidate).strip()
+            if len(candidate) < 3:
+                continue
+            # Reject if looks like a fragment (single letter prefix) or meta-text
+            if re.match(r'^[a-z]\s+', candidate):
+                continue
+            key = candidate.lower()
+            if key in seen_piped_len:
+                continue
+            seen_piped_len.add(key)
+            piped_names_lenient.append(candidate)
+        if piped_names_lenient:
+            return piped_names_lenient
+
+        # Extract quoted names early.
+        quoted_names = []
+        seen_quoted = set()
+        for match in re.findall(r'["“”\']([^"“”\']{3,80})["“”\']', text_value):
+            candidate = re.sub(r'\s+', ' ', match).strip()
+            if len(candidate) < 3:
+                continue
+            lower = candidate.lower()
+            if lower.startswith(('we need', 'json', 'day ', 'city:', 'duration', 'interests')):
+                continue
+            if lower in seen_quoted:
+                continue
+            seen_quoted.add(lower)
+            quoted_names.append(candidate)
+        if quoted_names:
+            return quoted_names
+
+        # Prefer explicit numbered list items if present.
+        numbered_names = []
+        seen_numbered = set()
+        numbered_matches = re.findall(r'(?:^|\n)\s*\d+\.\s*([^\n]+)', text_value)
+        for raw_item in numbered_matches:
+            candidate = raw_item.split('|', 1)[0].strip()
+            candidate = re.sub(r'\([^)]*\)', '', candidate).strip()
+            candidate = re.split(r'\s+[–—-]\s+|:\s+', candidate, maxsplit=1)[0].strip()
+            candidate = re.sub(r'[.,;:\s]+$', '', candidate).strip()
+            if len(candidate) < 3:
+                continue
+            # Reject if looks like a fragment (single letter prefix) or meta-text
+            if re.match(r'^[a-z]\s+', candidate):
+                continue
+            key = candidate.lower()
+            if key in seen_numbered:
+                continue
+            # Additional check: valid POI names should have meaningful words, not meta-text
+            if any(word in key for word in ('ensure', 'pick', 'provide', 'need', 'let', 'gather')):
+                continue
+            seen_numbered.add(key)
+            numbered_names.append(candidate)
+        if numbered_names:
+            return numbered_names
+
+        # Parse bulleted list items.
+        bulleted_names = []
+        seen_bulleted = set()
+        bulleted_matches = re.findall(r'(?:^|\n)\s*[-*•]\s*([^\n]+)', text_value)
+        for raw_item in bulleted_matches:
+            candidate = raw_item.split('|', 1)[0].strip()
+            candidate = re.sub(r'\([^)]*\)', '', candidate).strip()
+            candidate = re.sub(r'[.,;:\s]+$', '', candidate).strip()
+            if len(candidate) < 3:
+                continue
+            # Reject if looks like a fragment (single letter prefix) or meta-text
+            if re.match(r'^[a-z]\s+', candidate):
+                continue
+            key = candidate.lower()
+            if key in seen_bulleted:
+                continue
+            # Additional check: valid POI names should have meaningful words, not meta-text
+            if any(word in key for word in ('ensure', 'pick', 'provide', 'need', 'let', 'gather')):
+                continue
+            seen_bulleted.add(key)
+            bulleted_names.append(candidate)
+        if bulleted_names:
+            return bulleted_names
+
+        day_block_matches = re.findall(r'Day\s*\d+\s*:\s*([^\n]+)', str(text or ''), flags=re.IGNORECASE)
+        day_names = []
+        seen_day = set()
+        for block in day_block_matches:
+            parts = [part.strip() for part in block.split(',')]
+            for part in parts:
+                name = re.sub(r'\([^)]*\)', '', part).strip()
+                if len(name) < 3:
+                    continue
+                # Reject if looks like a fragment (single letter prefix) or meta-text
+                if re.match(r'^[a-z]\s+', name):
+                    continue
+                key = name.lower()
+                if key in seen_day:
+                    continue
+                # Additional check: valid POI names should have meaningful words, not meta-text
+                if any(word in key for word in ('ensure', 'pick', 'provide', 'need', 'let', 'gather')):
+                    continue
+                seen_day.add(key)
+                day_names.append(name)
+        if day_names:
+            return day_names
+
+        # Extract from "e.g., A, B, C" style prose.
+        prose_examples = []
+        seen_examples = set()
+        for match in re.findall(r'(?:e\.g\.|for example|such as)\s*[:\-]?\s*([^\n]+)', text_value, flags=re.IGNORECASE):
+            parts = [part.strip() for part in match.split(',')]
+            for part in parts:
+                name = re.sub(r'\([^)]*\)', '', part).strip()
+                name = re.sub(r'[.,;:\s]+$', '', name).strip()
+                if len(name) < 3:
+                    continue
+                key = name.lower()
+                if key in seen_examples:
+                    continue
+                seen_examples.add(key)
+                prose_examples.append(name)
+        if prose_examples:
+            return prose_examples
+
+        # Do not parse arbitrary prose lines; it causes garbage POI names.
+        return []
+
+    @classmethod
+    def _sanitize_suggested_names(cls, names: List[str], city: str) -> List[str]:
+        city_norm = re.sub(r'\s+', ' ', str(city or '').strip().lower())
+        blocked_prefixes = (
+            'we need',
+            'let us',
+            "let's",
+            'return ',
+            'city:',
+            'duration',
+            'interests',
+            'max stops',
+            'provide ',
+            'output ',
+            'json',
+            'day ',
+            'so we need',
+        )
+        
+        # Meta-text patterns that indicate fragments or reasoning text
+        meta_text_patterns = (
+            'ensure no duplicates',
+            'pick real',
+            'provide ',
+            'let\'s pick',
+            'let\'s list',
+            'let\'s gather',
+            'need to',
+            'need real',
+            'now pick',
+            'actually ',
+            'but we need',
+            'alternatively pick',
+            'such as',
+            'for example',
+            'instead of',
+            'maybe',
+            'let me',
+            'gather coordinates',
+            'find address',
+            'coordinate',
+            'address unknown',
+            'realistic',
+            'distinct',
+        )
+
+        cleaned = []
+        seen = set()
+        for value in names or []:
+            name = re.sub(r'\s+', ' ', str(value or '').strip())
+            name = name.lstrip('.').strip()
+            if len(name) < 3:
+                continue
+            lower = name.lower()
+            
+            # Filter blocked prefixes
+            if lower.startswith(blocked_prefixes):
+                continue
+            
+            # Filter meta-text patterns
+            if any(phrase in lower for phrase in meta_text_patterns):
+                continue
+            
+            # Filter obvious fragments (single lowercase letter followed by space)
+            if re.match(r'^[a-z]\s+', name):
+                continue
+            
+            # Filter names that are clearly incomplete sentences or phrases
+            if any(phrase in lower for phrase in cls._BAD_NAME_PHRASES):
+                continue
+            if lower in {city_norm, f'{city_norm}, turkey', f'{city_norm}, türkiye'}:
+                continue
+            if any(token in lower for token in ('duration', 'max stops', 'interests list', 'produce json')):
+                continue
+            if not re.search(r'[A-Za-zÀ-ÿ]', name):
+                continue
+            
+            # Name should not be too long (likely prose)
+            if len(name.split()) > 7:
+                continue
+            
+            # Too many periods suggests code/meta-text
+            if name.count('.') > 1:
+                continue
+            
+            # Reject if starts with numbers followed by dot (numbered list remnant)
+            if re.match(r'^\d+\.', name):
+                continue
+            
+            # Reject names with pipe characters (format markers)
+            if '|' in name:
+                continue
+
+            key = lower
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(name)
+
+        return cleaned
+
+    @classmethod
+    def _extract_suggested_names(cls, parsed: Dict[str, Any], raw_text: str) -> List[str]:
+        suggested = parsed.get('suggested_pois')
+        names = []
+        if isinstance(suggested, list):
+            for item in suggested:
+                if isinstance(item, dict) and item.get('name'):
+                    names.append(str(item.get('name')).strip())
+                elif isinstance(item, str):
+                    names.append(item.strip())
+
+        if not names:
+            fallback_keys = ['suggested_names', 'poi_names', 'places', 'ordered_poi_names']
+            for key in fallback_keys:
+                value = parsed.get(key)
+                if isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, str) and item.strip():
+                            names.append(item.strip())
+                if names:
+                    break
+
+        if not names:
+            names = cls._extract_names_from_text(raw_text)
+
+        normalized = []
+        seen = set()
+        for name in names:
+            clean = str(name or '').strip()
+            if not clean:
+                continue
+            key = clean.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(clean)
+        return normalized
+
+    @classmethod
+    def _extract_suggested_items(cls, parsed: Dict[str, Any], raw_text: str) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        suggested = parsed.get('suggested_pois') if isinstance(parsed, dict) else None
+        if isinstance(suggested, list):
+            for item in suggested:
+                if isinstance(item, dict):
+                    name = str(item.get('name') or '').strip()
+                    if not name:
+                        continue
+                    items.append(
+                        {
+                            'name': name,
+                            'reason': str(item.get('reason') or '').strip(),
+                            'address': str(item.get('address') or '').strip(),
+                            'day': item.get('day'),
+                            'latitude': item.get('latitude'),
+                            'longitude': item.get('longitude'),
+                        }
+                    )
+                elif isinstance(item, str) and item.strip():
+                    items.append({'name': item.strip()})
+
+        if items:
+            return items
+
+        # Fallback from unstructured text.
+        names = cls._extract_suggested_names(parsed, raw_text)
+        return [{'name': name} for name in names]
+
+    @classmethod
+    def _is_poi_suitable_for_itinerary(cls, poi: POI, interests: List[str]) -> bool:
+        tags = {cls._normalize_text(tag) for tag in (poi.tags or [])}
+        interests_set = {cls._normalize_text(item) for item in (interests or [])}
+        category = str(poi.category or '').upper()
+        name_norm = cls._normalize_text(poi.name)
+
+        # If user explicitly asks for otherwise excluded concepts, allow them.
+        explicit_override = bool(interests_set.intersection({'lodging', 'hotel', 'hostel', 'hospital', 'pharmacy'}))
+
+        if not explicit_override:
+            if category in cls._EXCLUDED_CATEGORIES_FOR_ITINERARY:
+                return False
+            if tags.intersection(cls._EXCLUDED_TAGS_FOR_ITINERARY):
+                return False
+            if any(token in name_norm for token in ('hospital', 'pharmacy', 'clinic', 'school', 'university')):
+                return False
+            if 'lodging' in tags or 'hotel' in tags or 'hostel' in tags:
+                return False
+
+        # Avoid previously created junk/noise POIs from malformed model text.
+        if not cls._sanitize_suggested_names([str(poi.name or '')], str((poi.metadata or {}).get('city') or '')):
+            return False
+
+        return True
+
+    @classmethod
+    def _match_suggested_names_to_pois(cls, suggested_names: List[str], candidate_pool: List[POI]) -> List[POI]:
+        if not suggested_names or not candidate_pool:
+            return []
+
+        exact_map = {}
+        for poi in candidate_pool:
+            exact_map.setdefault(cls._normalize_text(poi.name), []).append(poi)
+
+        selected: List[POI] = []
+        selected_ids = set()
+
+        for name in suggested_names:
+            normalized = cls._normalize_text(name)
+            matched = None
+
+            # 1) exact normalized match
+            exact_candidates = exact_map.get(normalized) or []
+            for poi in exact_candidates:
+                if poi.id not in selected_ids:
+                    matched = poi
+                    break
+
+            # 2) contains match
+            if matched is None:
+                for poi in candidate_pool:
+                    if poi.id in selected_ids:
+                        continue
+                    poi_norm = cls._normalize_text(poi.name)
+                    if normalized in poi_norm or poi_norm in normalized:
+                        matched = poi
+                        break
+
+            # 3) fuzzy best match
+            if matched is None:
+                best_score = 0.0
+                best_poi = None
+                for poi in candidate_pool:
+                    if poi.id in selected_ids:
+                        continue
+                    poi_norm = cls._normalize_text(poi.name)
+                    score = SequenceMatcher(None, normalized, poi_norm).ratio()
+                    if score > best_score:
+                        best_score = score
+                        best_poi = poi
+                if best_poi is not None and best_score >= 0.72:
+                    matched = best_poi
+
+            if matched is not None and matched.id not in selected_ids:
+                selected.append(matched)
+                selected_ids.add(matched.id)
+
+        return selected
+
+    @classmethod
+    def _infer_category_for_suggestion(cls, text: str, interests: List[str]) -> str:
+        normalized_text = cls._normalize_text(text)
+        normalized_interests = cls._normalize_interests(interests)
+        mapped = cls._map_interests_to_categories(normalized_interests)
+
+        keyword_map = [
+            (POI.Category.HISTORICAL, ('museum', 'cathedral', 'church', 'palace', 'monument', 'tower', 'historic', 'landmark', 'chapel')),
+            (POI.Category.NATURE, ('park', 'garden', 'forest', 'beach', 'lake', 'river', 'nature', 'hill')),
+            (POI.Category.FOOD, ('restaurant', 'cafe', 'bakery', 'bar', 'food', 'market', 'bistro', 'brasserie')),
+            (POI.Category.ENTERTAINMENT, ('club', 'theater', 'cinema', 'mall', 'shopping', 'nightlife', 'show')),
+        ]
+        for category, keywords in keyword_map:
+            if any(token in normalized_text for token in keywords):
+                return category
+
+        if mapped:
+            return mapped[0]
+        return POI.Category.ENTERTAINMENT
+
+    @classmethod
+    def _find_existing_city_poi_by_name(cls, city: str, name: str) -> POI | None:
+        city_query = cls._build_city_query(city)
+        normalized_name = str(name or '').strip()
+        if not normalized_name:
+            return None
+
+        exact = POI.objects.filter(city_query, name__iexact=normalized_name).order_by('-average_rating').first()
+        if exact:
+            return exact
+
+        starts_with = POI.objects.filter(city_query, name__istartswith=normalized_name).order_by('-average_rating').first()
+        if starts_with:
+            return starts_with
+
+        contains = POI.objects.filter(city_query, name__icontains=normalized_name).order_by('-average_rating').first()
+        return contains
+
+    @classmethod
+    def _geocode_place_name(cls, city: str, place_name: str) -> Dict[str, Any]:
+        query = f"{place_name}, {city}"
+        try:
+            response = requests.get(
+                'https://nominatim.openstreetmap.org/search',
+                params={
+                    'q': query,
+                    'format': 'jsonv2',
+                    'addressdetails': 1,
+                    'limit': 1,
+                },
+                headers={'User-Agent': 'ExcursaTripGeneration/1.0'},
+                timeout=8,
+            )
+            response.raise_for_status()
+            results = response.json() or []
+            if not results:
+                return {}
+            item = results[0]
+            lat = float(item.get('lat'))
+            lon = float(item.get('lon'))
+            display_name = str(item.get('display_name') or '').strip()
+            return {
+                'latitude': lat,
+                'longitude': lon,
+                'address': display_name or f"{place_name}, {city}",
+                'source': 'nominatim_place_search',
+                'osm_place_id': item.get('place_id'),
+            }
+        except Exception:
+            return {}
+
+    @classmethod
+    def _upsert_ai_suggested_poi(cls, *, city: str, suggestion: Dict[str, Any], interests: List[str]) -> POI | None:
+        name = str(suggestion.get('name') or '').strip()
+        if not name:
+            return None
+        if not cls._sanitize_suggested_names([name], city):
+            return None
+        if cls._normalize_text(name) == cls._normalize_text(city):
+            return None
+
+        existing = cls._find_existing_city_poi_by_name(city, name)
+        if existing:
+            return existing
+
+        latitude = suggestion.get('latitude')
+        longitude = suggestion.get('longitude')
+        address = str(suggestion.get('address') or '').strip()
+
+        try:
+            latitude = float(latitude) if latitude is not None else None
+            longitude = float(longitude) if longitude is not None else None
+        except (TypeError, ValueError):
+            latitude = None
+            longitude = None
+
+        if latitude is None or longitude is None:
+            geo = cls._geocode_place_name(city, name)
+            latitude = geo.get('latitude')
+            longitude = geo.get('longitude')
+            if not address:
+                address = str(geo.get('address') or '').strip()
+        else:
+            geo = {}
+
+        # Last-resort fallback: anchor unmatched AI place to city center.
+        if latitude is None or longitude is None:
+            center = cls._geocode_city_center(city)
+            if center:
+                base_lat = float(center['lat'])
+                base_lon = float(center['lon'])
+                # Deterministic micro-offset by place name to avoid stacked identical points.
+                digest = hashlib.sha1(name.encode('utf-8')).hexdigest()
+                lat_offset = ((int(digest[:4], 16) % 2001) - 1000) * 0.00001
+                lon_offset = ((int(digest[4:8], 16) % 2001) - 1000) * 0.00001
+                latitude = base_lat + lat_offset
+                longitude = base_lon + lon_offset
+                if not address:
+                    address = f"{name}, {city}"
+                geo = {
+                    'source': 'city_center_fallback',
+                    'city_center_lat': base_lat,
+                    'city_center_lon': base_lon,
+                    'lat_offset': lat_offset,
+                    'lon_offset': lon_offset,
+                }
+
+        if latitude is None or longitude is None:
+            return None
+
+        reason = str(suggestion.get('reason') or '').strip()
+        category = cls._infer_category_for_suggestion(f"{name} {reason}", interests)
+        city_tag = city.lower().replace(' ', '_')
+        tags = ['ai_suggested', city_tag] + cls._normalize_interests(interests)[:6]
+        tags = [tag for tag in dict.fromkeys(tags) if tag]
+
+        raw_key = f"{city}|{name}|{round(float(latitude), 5)}|{round(float(longitude), 5)}"
+        hash_key = hashlib.sha1(raw_key.encode('utf-8')).hexdigest()[:20]
+        external_id = f"ai-{hash_key}"
+
+        metadata = {
+            'source': 'ai_suggested',
+            'suggested_reason': reason,
+            'city': city,
+            'geocode': geo,
+        }
+        defaults = {
+            'name': name,
+            'address': address or f"{name}, {city}",
+            'location': Point(float(longitude), float(latitude)),
+            'category': category,
+            'average_rating': 4.2,
+            'metadata': metadata,
+            'tags': tags,
+        }
+        try:
+            poi, _ = POI.objects.update_or_create(external_id=external_id, defaults=defaults)
+            return poi
+        except Exception:
+            logger.exception("Failed creating AI suggested POI city=%s name=%s", city, name)
+            return None
+
+    @classmethod
+    def _plan_with_ai(
+        cls,
+        *,
+        city: str,
+        duration_days: int,
+        interests: List[str],
+        stops_per_day: int,
+        ranked_pois: List[POI],
+        max_stops: int,
+    ) -> Dict[str, Any]:
+        llm_client = cls._build_llm_client()
+        if llm_client is None:
+            return {'reason': 'llm_unavailable'}
+
+        candidate_pool = ranked_pois[:max(12, min(len(ranked_pois), max_stops * 6))]
+        if not candidate_pool:
+            return {'reason': 'no_candidates'}
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "⚠️ CRITICAL INSTRUCTIONS ⚠️\n\n"
+                    "Output ONLY POI lines. START IMMEDIATELY WITH THE FIRST LINE.\n"
+                    "NO preamble, NO thinking, NO reasoning, NO explanation.\n\n"
+                    "EXACT FORMAT (no variations):\n"
+                    "<name> | <address> | <lat,lon> | day <n>\n\n"
+                    "Example:\n"
+                    "Galata Tower | Galata, Istanbul | 41.0250,28.9820 | day 1\n"
+                    "Pierre Loti Café | Çamlıca, Istanbul | 41.0375,29.0210 | day 1\n"
+                    "Hagia Sophia | Sultanahmet, Istanbul | 41.0086,28.9802 | day 2\n\n"
+                    "MANDATORY RULES:\n"
+                    "• Output lines ONLY (no other text)\n"
+                    "• One POI per line\n"
+                    "• Real POI names only\n"
+                    "• NO JSON, NO markdown, NO asterisks\n"
+                    "• NO bullets or numbers\n"
+                    "• NO 'Day 1:', NO 'We need', NO 'Let's'\n"
+                    "• Leave address/coords empty if unknown (still use pipes)\n"
+                    "• Start typing POI lines immediately"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"GENERATE {max_stops} POI LINES FOR {city.upper()}\n\n"
+                    f"Format: <name> | <address> | <lat,lon> | day <n>\n\n"
+                    f"Trip: {duration_days} days, {stops_per_day} stops/day\n"
+                    f"Interests: {', '.join(interests)}\n\n"
+                    f"OUTPUT LINES NOW (no explanation):"
+                ),
+            },
+        ]
+
+        raw_response = ''
+        retry_raw = ''
+        parsed: Dict[str, Any] = {}
+        try:
+            raw_response = llm_client.generate_response(
+                messages=messages,
+                temperature=0.0,
+                max_tokens=450,
+            )
+            parsed = cls._extract_json_object(raw_response)
+        except Exception:
+            logger.exception("AI itinerary planning first pass failed city=%s", city)
+
+        suggested_items = cls._extract_suggested_items(parsed, raw_response)
+        sanitized_names = cls._sanitize_suggested_names(
+            [item['name'] for item in suggested_items if item.get('name')],
+            city,
+        )
+        suggested_items = [{'name': name} for name in sanitized_names]
+        suggested_names = sanitized_names
+        selected_pois = cls._match_suggested_names_to_pois(suggested_names, candidate_pool)
+
+        # Auto-create missing AI suggestions using geocoding (city + place name).
+        matched_names = {cls._normalize_text(poi.name) for poi in selected_pois}
+        for item in suggested_items:
+            if len(selected_pois) >= max_stops:
+                break
+            item_name_key = cls._normalize_text(item.get('name'))
+            if not item_name_key or item_name_key in matched_names:
+                continue
+            created = cls._upsert_ai_suggested_poi(city=city, suggestion=item, interests=interests)
+            if created is not None and created.id not in {poi.id for poi in selected_pois}:
+                selected_pois.append(created)
+                matched_names.add(item_name_key)
+
+        selected_pois = selected_pois[:max_stops]
+
+        # Always prefer cleaner retry output when available, even if first pass returned something.
+        retry_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "⚠️ OUTPUT ONLY POI LINES. NO PREAMBLE. NO THINKING. NO REASONING.\n\n"
+                    "Format: <name> | <address> | <lat,lon> | day <n>\n\n"
+                    "MANDATORY:\n"
+                    "• Start immediately with first POI line\n"
+                    "• One line per POI\n"
+                    "• Real POI names only\n"
+                    "• NO explanations, NO analysis\n"
+                    "• NO JSON, NO markdown, NO bullets\n"
+                    "• Leave empty fields empty (keep pipes)\n\n"
+                    "Example format:\n"
+                    "Galata Tower | Istanbul | 41.0250,28.9820 | day 1"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"OUTPUT {max_stops} POI LINES FOR {city}:\n"
+                    f"<name> | <address> | <lat,lon> | day <n>\n"
+                    f"START NOW (no explanation):"
+                ),
+            },
+        ]
+        try:
+            retry_raw = llm_client.generate_response(
+                messages=retry_messages,
+                temperature=0.0,
+                max_tokens=420,
+            )
+            retry_names_pref = cls._sanitize_suggested_names(cls._extract_names_from_text(retry_raw), city)
+            if len(retry_names_pref) >= max(3, min(6, max_stops // 2)):
+                preferred = cls._match_suggested_names_to_pois(retry_names_pref, candidate_pool)
+                matched_pref = {cls._normalize_text(poi.name) for poi in preferred}
+                pref_ids = {poi.id for poi in preferred}
+                for name in retry_names_pref:
+                    if len(preferred) >= max_stops:
+                        break
+                    key = cls._normalize_text(name)
+                    if key in matched_pref:
+                        continue
+                    created = cls._upsert_ai_suggested_poi(
+                        city=city,
+                        suggestion={'name': name},
+                        interests=interests,
+                    )
+                    if created is not None and created.id not in pref_ids:
+                        preferred.append(created)
+                        pref_ids.add(created.id)
+                        matched_pref.add(key)
+                preferred = preferred[:max_stops]
+                if preferred:
+                    selected_pois = preferred
+        except Exception:
+            logger.exception("AI retry planning failed city=%s", city)
+
+        if not selected_pois:
+            try:
+                retry_names = cls._sanitize_suggested_names(cls._extract_names_from_text(retry_raw), city)
+                retry_items = [{'name': name} for name in retry_names]
+                retry_names = [item['name'] for item in retry_items]
+                selected_pois = cls._match_suggested_names_to_pois(retry_names, candidate_pool)
+                matched_retry = {cls._normalize_text(poi.name) for poi in selected_pois}
+                for item in retry_items:
+                    if len(selected_pois) >= max_stops:
+                        break
+                    item_key = cls._normalize_text(item.get('name'))
+                    if not item_key or item_key in matched_retry:
+                        continue
+                    created = cls._upsert_ai_suggested_poi(city=city, suggestion=item, interests=interests)
+                    if created is not None and created.id not in {poi.id for poi in selected_pois}:
+                        selected_pois.append(created)
+                        matched_retry.add(item_key)
+                selected_pois = selected_pois[:max_stops]
+            except Exception:
+                logger.exception("AI retry planning failed city=%s", city)
+                return {'reason': 'llm_retry_failed'}
+
+            if not selected_pois:
+                # Third pass: extremely constrained format to minimize model meta-output.
+                final_retry_raw = ''
+                try:
+                    final_retry_raw = llm_client.generate_response(
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "OUTPUT ONLY POI LINES:\n"
+                                    "<name> | <address> | <lat,lon> | day <n>\n\n"
+                                    "NO preamble. NO thinking. NO explanation. NO meta-text.\n"
+                                    "Start typing lines immediately."
+                                ),
+                            },
+                            {
+                                "role": "user",
+                                "content": f"Output {max_stops} POI lines for {city} now:",
+                            },
+                        ],
+                        temperature=0.0,
+                        max_tokens=420,
+                    )
+                    final_names = cls._sanitize_suggested_names(cls._extract_names_from_text(final_retry_raw), city)
+                    selected_pois = cls._match_suggested_names_to_pois(final_names, candidate_pool)
+                    selected_pois = selected_pois[:max_stops]
+                except Exception:
+                    logger.exception("AI final retry planning failed city=%s", city)
+                    return {'reason': 'llm_retry_failed'}
+
+            # Prefer cleaner retry output when it yields enough places.
+            if retry_raw:
+                retry_names_pref = cls._sanitize_suggested_names(cls._extract_names_from_text(retry_raw), city)
+                if len(retry_names_pref) >= max(3, min(6, max_stops // 2)):
+                    preferred = cls._match_suggested_names_to_pois(retry_names_pref, candidate_pool)
+                    matched_pref = {cls._normalize_text(poi.name) for poi in preferred}
+                    pref_ids = {poi.id for poi in preferred}
+                    for name in retry_names_pref:
+                        if len(preferred) >= max_stops:
+                            break
+                        key = cls._normalize_text(name)
+                        if key in matched_pref:
+                            continue
+                        created = cls._upsert_ai_suggested_poi(
+                            city=city,
+                            suggestion={'name': name},
+                            interests=interests,
+                        )
+                        if created is not None and created.id not in pref_ids:
+                            preferred.append(created)
+                            pref_ids.add(created.id)
+                            matched_pref.add(key)
+                    preferred = preferred[:max_stops]
+                    if preferred:
+                        selected_pois = preferred
+
+            if not selected_pois:
+                logger.warning(
+                    "AI planning unusable output city=%s model_output_preview=%s retry_preview=%s",
+                    city,
+                    str(raw_response or '')[:220].replace('\n', ' '),
+                    str(retry_raw or '')[:220].replace('\n', ' '),
+                )
+                return {'reason': 'unusable_ai_output'}
+        if len(selected_pois) < max_stops:
+            for poi in ranked_pois:
+                if len(selected_pois) >= max_stops:
+                    break
+                if poi in selected_pois:
+                    continue
+                selected_pois.append(poi)
+
+        daily_themes = parsed.get('daily_themes') if isinstance(parsed, dict) else []
+        if not isinstance(daily_themes, list):
+            daily_themes = []
+
+        return {
+            'selected_pois': selected_pois,
+            'daily_themes': [str(item).strip() for item in daily_themes if str(item).strip()],
+            'reason': 'ok',
+            'raw_response': raw_response,
+            'retry_raw_response': retry_raw,
+        }
 
     @staticmethod
     def _map_external_to_category(place_class: str, place_type: str) -> str:
@@ -503,10 +1639,10 @@ class TripGenerationService:
     def _get_city_candidates(self, city: str, min_count: int) -> List[POI]:
         city_query = self._build_city_query(city)
         candidates = list(POI.objects.filter(city_query).order_by('-average_rating')[:500])
-        if len(candidates) >= min_count:
+        if candidates:
             return candidates
 
-        # Preferred generation path: sync external POIs (Google Places pipeline)
+        # Preferred generation path when local DB has no city POIs: sync external POIs.
         center = self._geocode_city_center(city)
         if center:
             try:
@@ -518,7 +1654,7 @@ class TripGenerationService:
                 candidates = list(POI.objects.filter(city_query).order_by('-average_rating')[:500])
             except Exception:
                 logger.exception("External city sync failed city=%s", city)
-            if len(candidates) >= min_count:
+            if candidates:
                 return candidates
 
         imported_count = self._hydrate_city_pois(city, limit=max(30, min_count * 4))
@@ -545,8 +1681,21 @@ class TripGenerationService:
         if not candidates:
             raise ValueError(f"No POIs found for city '{city}'.")
 
-        ranked_pois = self._rank_pois(candidates, interests)
-        selected_pois = self._select_diverse_pois(ranked_pois, max_stops, interests)
+        filtered_candidates = [poi for poi in candidates if self._is_poi_suitable_for_itinerary(poi, interests)]
+        ranking_pool = filtered_candidates if len(filtered_candidates) >= max(4, min(max_stops, 10)) else candidates
+        ranked_pois = self._rank_pois(ranking_pool, interests)
+        ai_plan = self._plan_with_ai(
+            city=city,
+            duration_days=duration_days,
+            interests=interests,
+            stops_per_day=stops_per_day,
+            ranked_pois=ranked_pois,
+            max_stops=max_stops,
+        )
+        selected_pois = ai_plan.get('selected_pois') or self._select_diverse_pois(ranked_pois, max_stops, interests)
+        planning_source = 'ai' if ai_plan.get('selected_pois') else 'rule_based'
+        daily_themes = ai_plan.get('daily_themes') or []
+        planning_source_reason = ai_plan.get('reason', 'fallback_rule_based')
 
         if not selected_pois:
             raise ValueError("No POIs matched the selected city/interests.")
@@ -557,43 +1706,15 @@ class TripGenerationService:
             start_dt = timezone.make_aware(start_dt)
             end_dt = timezone.make_aware(end_dt)
 
-        itinerary = (
-            Itinerary.objects
-            .filter(user=user, status=Itinerary.Status.DRAFT)
-            .order_by('-updated_at', '-created_at')
-            .first()
+        itinerary = Itinerary.objects.create(
+            user=user,
+            title=title,
+            start_date=start_dt,
+            end_date=end_dt,
+            visibility=visibility,
+            transport_mode=transport_mode,
+            status=Itinerary.Status.DRAFT,
         )
-        reused_draft = itinerary is not None
-
-        if itinerary is None:
-            itinerary = Itinerary.objects.create(
-                user=user,
-                title=title,
-                start_date=start_dt,
-                end_date=end_dt,
-                visibility=visibility,
-                transport_mode=transport_mode,
-                status=Itinerary.Status.DRAFT,
-            )
-        else:
-            itinerary.title = title
-            itinerary.start_date = start_dt
-            itinerary.end_date = end_dt
-            itinerary.visibility = visibility
-            itinerary.transport_mode = transport_mode
-            itinerary.status = Itinerary.Status.DRAFT
-            itinerary.save(
-                update_fields=[
-                    'title',
-                    'start_date',
-                    'end_date',
-                    'visibility',
-                    'transport_mode',
-                    'status',
-                    'updated_at',
-                ]
-            )
-            itinerary.itineraryitem_set.all().delete()
 
         hour_slots = [9, 11, 14, 17, 19, 20, 21, 22]
         day_plan: List[Dict[str, Any]] = []
@@ -620,6 +1741,7 @@ class TripGenerationService:
                 {
                     'day': day + 1,
                     'date': day_date.isoformat(),
+                    'theme': daily_themes[day] if day < len(daily_themes) else None,
                     'stops_count': len(day_stops),
                     'stops': day_stops,
                 }
@@ -630,5 +1752,9 @@ class TripGenerationService:
             'selected_pois_count': len(selected_pois),
             'candidate_pois_count': len(candidates),
             'day_plan': day_plan,
-            'reused_draft': reused_draft,
+            'reused_draft': False,
+            'planning_source': planning_source,
+            'planning_source_reason': planning_source_reason,
+            'ai_raw_response': ai_plan.get('raw_response', ''),
+            'ai_retry_raw_response': ai_plan.get('retry_raw_response', ''),
         }

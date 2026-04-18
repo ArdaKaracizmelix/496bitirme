@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
+from datetime import datetime
 from mongoengine.queryset.visitor import Q
 from .models import SocialPost
 from .serializers import (
@@ -173,38 +174,80 @@ class SocialPostViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def feed(self, request):
         """
-        Generate home feed for authenticated user.
-        Aggregates posts from followed users and injects trending posts.
+        Generate feed for authenticated user.
+
+        Query params:
+        - scope=explore   -> all public posts from all users
+        - scope=following -> only posts from users this profile follows
+        - scope=mixed     -> legacy hybrid feed (following + trending/public backfill)
         """
         if not request.user.is_authenticated:
             return Response(
                 {'error': 'Authentication required'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
-        
+
+        scope = str(request.query_params.get('scope', 'mixed')).strip().lower()
+        limit = int(request.query_params.get('limit', 10))
+        cursor = request.query_params.get('cursor')
+
         user_profile = request.user.profile
-        
+
         # Get list of users this profile is following from the explicit relation table.
-        # This avoids any ambiguity in many-to-many resolution and is safer for visibility checks.
         from user.models import FollowRelation
         following_ids = list(
             FollowRelation.objects.filter(follower=user_profile).values_list('following_id', flat=True)
         )
-        
-        # Add self to get own posts too
-        following_ids.append(user_profile.id)
-        
-        cursor = request.query_params.get('cursor')
-        
-        posts, next_cursor = self.service.generate_feed(
-            user_profile.id,
-            following_ids,
-            cursor
-        )
-        
+
+        created_at_filter = None
+        if cursor:
+            try:
+                created_at_filter = datetime.fromisoformat(cursor)
+            except (TypeError, ValueError):
+                created_at_filter = None
+
+        if scope == 'explore':
+            query = SocialPost.objects(visibility=SocialPost.Visibility.PUBLIC)
+            if created_at_filter:
+                query = query(created_at__lt=created_at_filter)
+            post_list = list(query.order_by('-created_at').limit(limit + 1))
+            has_next = len(post_list) > limit
+            if has_next:
+                post_list = post_list[:limit]
+            posts = [
+                self.service._post_to_dto(post, current_user_id=user_profile.id)
+                for post in post_list
+            ]
+            next_cursor = posts[-1].get('created_at') if has_next and posts else None
+        elif scope == 'following':
+            query = SocialPost.objects(
+                user_ref_id__in=following_ids,
+                visibility__in=[SocialPost.Visibility.PUBLIC, SocialPost.Visibility.FOLLOWERS],
+            )
+            if created_at_filter:
+                query = query(created_at__lt=created_at_filter)
+            post_list = list(query.order_by('-created_at').limit(limit + 1))
+            has_next = len(post_list) > limit
+            if has_next:
+                post_list = post_list[:limit]
+            posts = [
+                self.service._post_to_dto(post, current_user_id=user_profile.id)
+                for post in post_list
+            ]
+            next_cursor = posts[-1].get('created_at') if has_next and posts else None
+        else:
+            # Keep existing behavior for backward compatibility.
+            following_with_self = following_ids + [user_profile.id]
+            posts, next_cursor = self.service.generate_feed(
+                user_profile.id,
+                following_with_self,
+                cursor
+            )
+
         response = {
             'posts': posts,
-            'next_cursor': next_cursor
+            'next_cursor': next_cursor,
+            'scope': scope,
         }
         return Response(response)
     

@@ -183,6 +183,20 @@ class AuthManager {
   }
 
   /**
+   * Permanently delete currently authenticated user's account.
+   * Clears local session after successful deletion.
+   */
+  async deleteAccount() {
+    try {
+      await api.delete('/user/me/');
+    } catch (error) {
+      throw error;
+    }
+
+    await this.clearSession();
+  }
+
+  /**
    * Save session tokens and user profile to persistent storage
    * @param {Object} data - { user, access, refresh }
    * @returns {Promise<void>}

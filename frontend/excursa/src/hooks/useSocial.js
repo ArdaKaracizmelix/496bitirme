@@ -46,6 +46,13 @@ const updatePostInsideFeedPages = (feedData, postId, updater) => {
   };
 };
 
+const updateAllFeedCaches = (queryClient, updater) => {
+  const entries = queryClient.getQueriesData({ queryKey: ['feed'] });
+  entries.forEach(([queryKey, value]) => {
+    queryClient.setQueryData(queryKey, updater(value));
+  });
+};
+
 const mergeSaveResponse = (existingPost, response) => {
   if (!existingPost) return existingPost;
 
@@ -83,11 +90,11 @@ const mergeLikeResponse = (existingPost, response) => {
 /**
  * Hook: Fetch home feed with infinite scroll pagination
  */
-export const useFeed = (enabled = true) => {
+export const useFeed = (enabled = true, scope = 'explore') => {
   return useInfiniteQuery({
-    queryKey: ['feed'],
+    queryKey: ['feed', scope],
     queryFn: async ({ pageParam = null }) => {
-      const response = await SocialService.fetchFeed(pageParam, 10);
+      const response = await SocialService.fetchFeed(pageParam, 10, scope);
       return response;
     },
     getNextPageParam: (lastPage) => lastPage.nextPageCursor || undefined,
@@ -314,21 +321,18 @@ export const useToggleLike = () => {
 
       // Snapshot the previous value
       const previousPost = queryClient.getQueryData(['post', targetPostId]);
-      const previousFeed = queryClient.getQueryData(['feed']);
+      const previousFeedEntries = queryClient.getQueriesData({ queryKey: ['feed'] });
 
       // Optimistically update to new value
       if (previousPost) {
         queryClient.setQueryData(['post', targetPostId], applyLikeToggle(previousPost));
       }
 
-      if (previousFeed) {
-        queryClient.setQueryData(
-          ['feed'],
-          updatePostInsideFeedPages(previousFeed, targetPostId, applyLikeToggle)
-        );
-      }
+      updateAllFeedCaches(queryClient, (existingFeed) =>
+        updatePostInsideFeedPages(existingFeed, targetPostId, applyLikeToggle)
+      );
 
-      return { previousPost, previousFeed, targetPostId };
+      return { previousPost, previousFeedEntries, targetPostId };
     },
     onError: (_, __, context) => {
       if (!context?.targetPostId) return;
@@ -337,9 +341,9 @@ export const useToggleLike = () => {
       if (context?.previousPost) {
         queryClient.setQueryData(['post', context.targetPostId], context.previousPost);
       }
-      if (context?.previousFeed) {
-        queryClient.setQueryData(['feed'], context.previousFeed);
-      }
+      (context?.previousFeedEntries || []).forEach(([queryKey, value]) => {
+        queryClient.setQueryData(queryKey, value);
+      });
     },
     onSuccess: (response, targetPostId) => {
       if (!targetPostId) return;
@@ -347,7 +351,7 @@ export const useToggleLike = () => {
       queryClient.setQueryData(['post', targetPostId], (existingPost) =>
         mergeLikeResponse(existingPost, response)
       );
-      queryClient.setQueryData(['feed'], (oldFeed) =>
+      updateAllFeedCaches(queryClient, (oldFeed) =>
         updatePostInsideFeedPages(oldFeed, targetPostId, (existingPost) =>
           mergeLikeResponse(existingPost, response)
         )
@@ -369,19 +373,16 @@ export const useToggleSave = () => {
       await queryClient.cancelQueries({ queryKey: ['savedPosts'] });
 
       const previousPost = queryClient.getQueryData(['post', targetPostId]);
-      const previousFeed = queryClient.getQueryData(['feed']);
+      const previousFeedEntries = queryClient.getQueriesData({ queryKey: ['feed'] });
       const previousSavedPosts = queryClient.getQueryData(['savedPosts']);
 
       if (previousPost) {
         queryClient.setQueryData(['post', targetPostId], applySaveToggle(previousPost));
       }
 
-      if (previousFeed) {
-        queryClient.setQueryData(
-          ['feed'],
-          updatePostInsideFeedPages(previousFeed, targetPostId, applySaveToggle)
-        );
-      }
+      updateAllFeedCaches(queryClient, (existingFeed) =>
+        updatePostInsideFeedPages(existingFeed, targetPostId, applySaveToggle)
+      );
 
       if (previousSavedPosts) {
         queryClient.setQueryData(
@@ -390,7 +391,7 @@ export const useToggleSave = () => {
         );
       }
 
-      return { previousPost, previousFeed, previousSavedPosts, targetPostId };
+      return { previousPost, previousFeedEntries, previousSavedPosts, targetPostId };
     },
     onError: (_, __, context) => {
       if (!context?.targetPostId) return;
@@ -398,9 +399,9 @@ export const useToggleSave = () => {
       if (context?.previousPost) {
         queryClient.setQueryData(['post', context.targetPostId], context.previousPost);
       }
-      if (context?.previousFeed) {
-        queryClient.setQueryData(['feed'], context.previousFeed);
-      }
+      (context?.previousFeedEntries || []).forEach(([queryKey, value]) => {
+        queryClient.setQueryData(queryKey, value);
+      });
       if (context?.previousSavedPosts) {
         queryClient.setQueryData(['savedPosts'], context.previousSavedPosts);
       }
@@ -411,7 +412,7 @@ export const useToggleSave = () => {
       queryClient.setQueryData(['post', targetPostId], (existingPost) =>
         mergeSaveResponse(existingPost, response)
       );
-      queryClient.setQueryData(['feed'], (oldFeed) =>
+      updateAllFeedCaches(queryClient, (oldFeed) =>
         updatePostInsideFeedPages(oldFeed, targetPostId, (existingPost) =>
           mergeSaveResponse(existingPost, response)
         )

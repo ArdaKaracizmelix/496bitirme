@@ -3,7 +3,7 @@ import re
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import UserProfile
+from .models import FollowRelation, UserProfile
 
 User = get_user_model()
 
@@ -12,6 +12,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True)
     email = serializers.CharField(source="user.email", read_only=True)
     full_name = serializers.SerializerMethodField()
+    followers_count = serializers.SerializerMethodField()
+    following_count = serializers.SerializerMethodField()
     has_interests = serializers.SerializerMethodField()
     interests = serializers.SerializerMethodField()
     is_following = serializers.SerializerMethodField()
@@ -37,6 +39,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     def get_full_name(self, obj):
         return f"{obj.user.first_name} {obj.user.last_name}".strip()
+
+    def get_followers_count(self, obj):
+        return FollowRelation.objects.filter(following=obj).count()
+
+    def get_following_count(self, obj):
+        return FollowRelation.objects.filter(follower=obj).count()
 
     def get_has_interests(self, obj):
         return bool(obj.preferences_vector)

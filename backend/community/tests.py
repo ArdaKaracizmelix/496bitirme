@@ -11,7 +11,7 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 from django.urls import reverse
 from django.contrib.auth.models import User
-from user.models import UserProfile
+from user.models import UserProfile, FollowRelation
 
 
 class SocialPostTestCase(unittest.TestCase):
@@ -155,6 +155,59 @@ class CommunityAPITestCase(APITestCase):
         self.assertIn('posts', response.data)
         # Should see own post in feed (since we follow ourselves in the logic)
         self.assertGreater(len(response.data['posts']), 0)
+
+    def test_feed_scope_following_only_returns_followed_users_posts(self):
+        """Following scope should include only followed users' posts."""
+        followed_user = User.objects.create_user(username='followed_user', password='password')
+        followed_profile = UserProfile.objects.create(user=followed_user)
+        not_followed_user = User.objects.create_user(username='not_followed_user', password='password')
+        not_followed_profile = UserProfile.objects.create(user=not_followed_user)
+
+        FollowRelation.objects.create(follower=self.profile, following=followed_profile)
+
+        followed_post = SocialPost(
+            user_ref_id=followed_profile.id,
+            content="Followed post",
+            visibility="PUBLIC"
+        )
+        followed_post.save()
+        self.created_post_ids.append(str(followed_post.id))
+
+        hidden_post = SocialPost(
+            user_ref_id=not_followed_profile.id,
+            content="Not followed post",
+            visibility="PUBLIC"
+        )
+        hidden_post.save()
+        self.created_post_ids.append(str(hidden_post.id))
+
+        url = reverse('socialpost-feed')
+        response = self.client.get(url, {'scope': 'following'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get('posts', [])
+        self.assertTrue(any(item.get('id') == str(followed_post.id) for item in results))
+        self.assertFalse(any(item.get('id') == str(hidden_post.id) for item in results))
+
+    def test_feed_scope_explore_returns_public_posts(self):
+        """Explore scope should include public posts regardless of following relation."""
+        other_user = User.objects.create_user(username='explore_other', password='password')
+        other_profile = UserProfile.objects.create(user=other_user)
+
+        public_post = SocialPost(
+            user_ref_id=other_profile.id,
+            content="Public explore post",
+            visibility="PUBLIC"
+        )
+        public_post.save()
+        self.created_post_ids.append(str(public_post.id))
+
+        url = reverse('socialpost-feed')
+        response = self.client.get(url, {'scope': 'explore'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get('posts', [])
+        self.assertTrue(any(item.get('id') == str(public_post.id) for item in results))
 
     def test_toggle_like_api(self):
         """Test liking a post via API."""

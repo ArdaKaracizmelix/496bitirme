@@ -11,7 +11,7 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from infra.cache import RedisCacheManager
 from task_queue.services import EmailService
-from .models import UserProfile
+from .models import FollowRelation, UserProfile
 
 
 EMAIL_VERIFICATION_SALT = "user.email.verification"
@@ -23,6 +23,8 @@ def build_user_payload(profile: UserProfile) -> dict:
     interest_keys = []
     if isinstance(profile.preferences_vector, dict):
         interest_keys = list(profile.preferences_vector.keys())
+    followers_count = FollowRelation.objects.filter(following=profile).count()
+    following_count = FollowRelation.objects.filter(follower=profile).count()
     return {
         "id": str(profile.id),
         "username": user.username,
@@ -33,8 +35,8 @@ def build_user_payload(profile: UserProfile) -> dict:
         "is_verified": profile.is_verified,
         "has_interests": bool(profile.preferences_vector),
         "interests": interest_keys,
-        "followers_count": profile.followers_count,
-        "following_count": profile.following_count,
+        "followers_count": followers_count,
+        "following_count": following_count,
     }
 
 

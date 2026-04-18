@@ -34,9 +34,9 @@ class SocialService {
    * Fetch the home feed for the current user
    * Returns posts from followed users with pagination
    */
-  async fetchFeed(cursor = null, limit = 10) {
+  async fetchFeed(cursor = null, limit = 10, scope = 'explore') {
     try {
-      const params = { limit };
+      const params = { limit, scope };
       if (cursor) {
         params.cursor = cursor;
       }
@@ -364,6 +364,7 @@ class SocialService {
 
       const response = await api.post('/media_storage/images/', formData, {
         timeout: 60000,
+        forceMultipart: true,
       });
       const uploadedUrl = response?.data?.url;
       if (!uploadedUrl) {

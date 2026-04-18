@@ -41,16 +41,36 @@ class ItineraryViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        """Get itineraries - own itineraries or public ones"""
+        """Get itineraries with sensible defaults for authenticated users."""
         user = self.request.user
-        # Show user's own itineraries or public itineraries from other users
         from django.db.models import Q
         from django.utils import timezone
-        from datetime import timedelta
-        
-        queryset = Itinerary.objects.filter(
-            Q(user=user) | Q(visibility=Itinerary.Visibility.PUBLIC)
-        ).order_by('-created_at').distinct()
+
+        include_public_param = self.request.query_params.get('include_public')
+        include_public = (
+            isinstance(include_public_param, str)
+            and include_public_param.lower() == 'true'
+        )
+
+        if not user.is_authenticated:
+            queryset = Itinerary.objects.filter(
+                visibility=Itinerary.Visibility.PUBLIC
+            )
+        elif self.action == 'list':
+            # Default list for signed-in users should show only their own itineraries.
+            if include_public:
+                queryset = Itinerary.objects.filter(
+                    Q(user=user) | Q(visibility=Itinerary.Visibility.PUBLIC)
+                ).distinct()
+            else:
+                queryset = Itinerary.objects.filter(user=user)
+        else:
+            # Keep public visibility for detail actions (retrieve/clone/share access).
+            queryset = Itinerary.objects.filter(
+                Q(user=user) | Q(visibility=Itinerary.Visibility.PUBLIC)
+            ).distinct()
+
+        queryset = queryset.order_by('-created_at')
         
         # Filter by status
         status_param = self.request.query_params.get('status')
@@ -133,6 +153,42 @@ class ItineraryViewSet(viewsets.ModelViewSet):
         if instance.user != self.request.user:
             raise PermissionDenied("You can only delete your own itineraries")
         instance.delete()
+
+    @staticmethod
+    def _merge_interests(requested_interests, user):
+        requested = []
+        seen = set()
+
+        for item in requested_interests or []:
+            normalized = str(item or '').strip().lower().replace('-', '_').replace(' ', '_')
+            if normalized and normalized not in seen:
+                requested.append(normalized)
+                seen.add(normalized)
+
+        # If user explicitly provided interests, do not append noisy profile history.
+        if requested:
+            return requested
+
+        profile = getattr(user, 'profile', None)
+        profile_interests = []
+        if profile is not None and isinstance(profile.preferences_vector, dict):
+            weighted = []
+            for key, weight in profile.preferences_vector.items():
+                normalized = str(key or '').strip().lower().replace('-', '_').replace(' ', '_')
+                if not normalized or normalized in seen:
+                    continue
+                try:
+                    numeric_weight = float(weight)
+                except (TypeError, ValueError):
+                    numeric_weight = 0.0
+                weighted.append((normalized, numeric_weight))
+
+            # Keep only top profile interests to avoid polluting planning.
+            for normalized, _ in sorted(weighted, key=lambda item: item[1], reverse=True)[:12]:
+                profile_interests.append(normalized)
+                seen.add(normalized)
+
+        return requested + profile_interests
 
     @action(detail=True, methods=['post'])
     def clone(self, request, pk=None):
@@ -468,7 +524,7 @@ class ItineraryViewSet(viewsets.ModelViewSet):
 
         city = payload['city']
         duration_days = payload['duration_days']
-        interests = payload.get('interests', [])
+        interests = self._merge_interests(payload.get('interests', []), request.user)
         start_date = payload.get('start_date') or timezone.localdate()
         title = payload.get('title') or f"{city} {duration_days}-Day Trip"
         visibility = payload.get('visibility', Itinerary.Visibility.PRIVATE)
@@ -503,6 +559,7 @@ class ItineraryViewSet(viewsets.ModelViewSet):
             {
                 'day': item['day'],
                 'date': item['date'],
+                'theme': item.get('theme'),
                 'stops_count': item['stops_count'],
                 'stops': POIListSerializer(item['stops'], many=True).data,
             }
@@ -520,11 +577,18 @@ class ItineraryViewSet(viewsets.ModelViewSet):
                     'stops_per_day': stops_per_day,
                     'candidate_pois_count': result['candidate_pois_count'],
                     'selected_pois_count': result['selected_pois_count'],
+                    'planning_source': result.get('planning_source', 'rule_based'),
+                    'planning_source_reason': result.get('planning_source_reason', 'unknown'),
+                },
+                'ai_debug': {
+                    'raw_response': result.get('ai_raw_response', ''),
+                    'retry_raw_response': result.get('ai_retry_raw_response', ''),
                 },
                 'day_plan': day_plan_response,
             },
             status=status.HTTP_201_CREATED,
         )
+    @action(detail=False, methods=['get'])
     def my_itineraries(self, request):
         """
         Get all itineraries belonging to the current user.

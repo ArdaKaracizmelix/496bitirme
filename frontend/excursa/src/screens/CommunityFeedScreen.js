@@ -26,7 +26,7 @@ import { buildPostLink, copyTextToClipboard } from '../utils/linkUtils';
 const QUICK_ITEMS = [
   { id: 'feed', title: 'Akis', subtitle: 'Sosyal feed' },
   { id: 'route', title: 'Rota', subtitle: 'Gezi plani' },
-  { id: 'explore', title: 'Kesfet', subtitle: 'Harita' },
+  { id: 'explore', title: 'Harita', subtitle: 'Kesfet' },
   { id: 'saved', title: 'Kayitlar', subtitle: 'Favoriler' },
 ];
 
@@ -64,10 +64,19 @@ export default function CommunityFeedScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const [activeList, setActiveList] = useState('feed');
+  const [feedScope, setFeedScope] = useState('explore');
   const currentUserId = user?.id || user?.profile_id || user?.profile?.id;
-  const feedQuery = useFeed(activeList === 'feed');
+  const exploreFeedQuery = useFeed(
+    activeList === 'feed' && feedScope === 'explore',
+    'explore'
+  );
+  const followingFeedQuery = useFeed(
+    activeList === 'feed' && feedScope === 'following',
+    'following'
+  );
   const savedPostsQuery = useSavedPosts(activeList === 'saved');
   const unreadNotificationsQuery = useUnreadNotifications();
+  const activeFeedQuery = feedScope === 'following' ? followingFeedQuery : exploreFeedQuery;
   const {
     data,
     isLoading,
@@ -77,7 +86,7 @@ export default function CommunityFeedScreen() {
     isFetchingNextPage,
     refetch,
     isRefetching,
-  } = activeList === 'saved' ? savedPostsQuery : feedQuery;
+  } = activeList === 'saved' ? savedPostsQuery : activeFeedQuery;
 
   const toggleLikeMutation = useToggleLike();
   const toggleSaveMutation = useToggleSave();
@@ -271,7 +280,10 @@ export default function CommunityFeedScreen() {
       return;
     }
     if (itemId === 'route') {
-      navigation.navigate('Trips', { screen: 'IterinaryBuilder' });
+      navigation.navigate('Trips', {
+        screen: 'IterinaryBuilder',
+        params: { tripId: null, mode: 'create' },
+      });
       return;
     }
     if (itemId === 'explore') {
@@ -312,7 +324,9 @@ export default function CommunityFeedScreen() {
         <View>
           <Text style={styles.brand}>EXCURSA</Text>
           <Text style={[styles.title, isCompact && styles.titleCompact]}>
-            {activeList === 'saved' ? 'Kaydedilenler' : 'Akis'}
+            {activeList === 'saved'
+              ? 'Kaydedilenler'
+                : 'Akis'}
           </Text>
         </View>
         <View style={styles.topSearchWrap}>
@@ -395,9 +409,57 @@ export default function CommunityFeedScreen() {
           );
         }}
       />
+      {activeList === 'feed' ? (
+        <View style={styles.feedScopeRow}>
+          <TouchableOpacity
+            style={[
+              styles.feedScopeButton,
+              feedScope === 'explore' && styles.feedScopeButtonActive,
+            ]}
+            onPress={() => setFeedScope('explore')}
+          >
+            <Text
+              style={[
+                styles.feedScopeText,
+                feedScope === 'explore' && styles.feedScopeTextActive,
+              ]}
+            >
+              Kesfet
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.feedScopeButton,
+              feedScope === 'following' && styles.feedScopeButtonActive,
+            ]}
+            onPress={() => setFeedScope('following')}
+          >
+            <Text
+              style={[
+                styles.feedScopeText,
+                feedScope === 'following' && styles.feedScopeTextActive,
+              ]}
+            >
+              Takip
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
     </View>
-  ), [contentMaxWidth, isCompact, userSearchQuery, suggestedUsers, handleQuickAction, handleSuggestedUserPress, handleSearchFocus, handleNotificationsPress, activeList, unreadNotifications]);
+  ), [
+    contentMaxWidth,
+    isCompact,
+    userSearchQuery,
+    suggestedUsers,
+    handleQuickAction,
+    handleSuggestedUserPress,
+    handleSearchFocus,
+    handleNotificationsPress,
+    activeList,
+    feedScope,
+    unreadNotifications,
+  ]);
 
   const renderState = (title, subtitle, actionLabel, action) => (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -441,12 +503,18 @@ export default function CommunityFeedScreen() {
           {headerComponent}
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>
-              {activeList === 'saved' ? 'Kayitli gonderi yok' : 'Henuz gonderi yok'}
+              {activeList === 'saved'
+                ? 'Kayitli gonderi yok'
+                : feedScope === 'following'
+                  ? 'Takip ettiklerinden gonderi yok'
+                  : 'Henuz gonderi yok'}
             </Text>
             <Text style={styles.emptySubtitle}>
               {activeList === 'saved'
                 ? 'Bir gonderiyi kaydedince burada gorunecek.'
-                : 'Ilk gezi anini paylasarak akisi baslatabilirsin.'}
+                : feedScope === 'following'
+                  ? 'Takip etmeye basladigin hesaplarin gonderileri burada gorunecek.'
+                  : 'Ilk gezi anini paylasarak akisi baslatabilirsin.'}
             </Text>
             {activeList === 'saved' ? null : (
               <TouchableOpacity
@@ -776,6 +844,32 @@ const styles = StyleSheet.create({
   quickRail: {
     paddingRight: 18,
     gap: 10,
+  },
+  feedScopeRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  feedScopeButton: {
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: '#fffdf8',
+    borderWidth: 1,
+    borderColor: '#e8dfcf',
+  },
+  feedScopeButtonActive: {
+    backgroundColor: '#1a1a2e',
+    borderColor: '#1a1a2e',
+  },
+  feedScopeText: {
+    color: '#6f6658',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  feedScopeTextActive: {
+    color: '#fff',
   },
   quickCard: {
     width: 112,

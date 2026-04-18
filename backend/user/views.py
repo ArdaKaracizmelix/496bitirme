@@ -33,6 +33,50 @@ from .services import (
 
 User = get_user_model()
 
+
+def _cleanup_social_data(profile_id):
+    """
+    Remove social content owned by the profile and strip their interactions
+    from other posts in MongoDB.
+    """
+    try:
+        from community.models import SocialPost
+    except Exception:
+        return
+
+    try:
+        SocialPost.objects(user_ref_id=profile_id).delete()
+        SocialPost.objects(likes=profile_id).update(pull__likes=profile_id)
+        SocialPost.objects(saved_by=profile_id).update(pull__saved_by=profile_id)
+        SocialPost.objects(comments__user_id=profile_id).update(
+            pull__comments__user_id=profile_id
+        )
+    except Exception:
+        # Account deletion should still succeed even if social cleanup partially fails.
+        pass
+
+
+def _recalculate_follow_counts_for_profiles(profile_ids):
+    """Recompute denormalized follow counters for the given profile IDs."""
+    if not profile_ids:
+        return
+
+    profiles = UserProfile.objects.filter(id__in=list(profile_ids))
+    for profile in profiles:
+        followers_count = FollowRelation.objects.filter(following=profile).count()
+        following_count = FollowRelation.objects.filter(follower=profile).count()
+
+        updates = []
+        if profile.followers_count != followers_count:
+            profile.followers_count = followers_count
+            updates.append("followers_count")
+        if profile.following_count != following_count:
+            profile.following_count = following_count
+            updates.append("following_count")
+
+        if updates:
+            profile.save(update_fields=updates)
+
 # Create your views here.
 
 GOOGLE_INTEREST_GROUPS = {
@@ -219,6 +263,8 @@ def build_user_payload(profile: UserProfile) -> dict:
     interest_keys = []
     if isinstance(profile.preferences_vector, dict):
         interest_keys = list(profile.preferences_vector.keys())
+    followers_count = FollowRelation.objects.filter(following=profile).count()
+    following_count = FollowRelation.objects.filter(follower=profile).count()
     return {
         "id": str(profile.id),
         "username": user.username,
@@ -229,8 +275,8 @@ def build_user_payload(profile: UserProfile) -> dict:
         "is_verified": profile.is_verified,
         "has_interests": bool(profile.preferences_vector),
         "interests": interest_keys,
-        "followers_count": profile.followers_count,
-        "following_count": profile.following_count,
+        "followers_count": followers_count,
+        "following_count": following_count,
     }
 
 
@@ -538,6 +584,26 @@ class MeView(APIView):
 
         return Response(
             {"user": build_user_payload(profile)},
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        user = request.user
+        profile_id = profile.id
+        affected_profile_ids = set(
+            FollowRelation.objects.filter(follower=profile).values_list("following_id", flat=True)
+        )
+        affected_profile_ids.update(
+            FollowRelation.objects.filter(following=profile).values_list("follower_id", flat=True)
+        )
+
+        _cleanup_social_data(profile_id)
+        user.delete()
+        _recalculate_follow_counts_for_profiles(affected_profile_ids)
+
+        return Response(
+            {"detail": "Account deleted successfully"},
             status=status.HTTP_200_OK,
         )
 

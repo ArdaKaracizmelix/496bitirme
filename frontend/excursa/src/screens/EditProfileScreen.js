@@ -30,6 +30,7 @@ export default function EditProfileScreen() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const updateUser = useAuthStore((state) => state.updateUser);
+  const deleteAccount = useAuthStore((state) => state.deleteAccount);
   const contentMaxWidth = width >= 900 ? 720 : 640;
 
   const [username, setUsername] = useState(user?.username || user?.email?.split('@')[0] || '');
@@ -41,6 +42,7 @@ export default function EditProfileScreen() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   const avatarPreview = avatarUrl || FALLBACK_AVATAR;
@@ -61,30 +63,48 @@ export default function EditProfileScreen() {
       return avatarUrl.trim();
     }
 
-    const fileName = selectedAvatarAsset.fileName || `avatar-${Date.now()}.jpg`;
-    const contentType = selectedAvatarAsset.mimeType || 'image/jpeg';
-    const formData = new FormData();
+    try {
+      const fileName = selectedAvatarAsset.fileName || `avatar-${Date.now()}.jpg`;
+      const contentType =
+        selectedAvatarAsset.mimeType ||
+        (selectedAvatarAsset.type ? `image/${selectedAvatarAsset.type}` : null) ||
+        'image/jpeg';
+      const formData = new FormData();
 
-    if (Platform.OS === 'web') {
-      if (selectedAvatarAsset.file) {
-        formData.append('file', selectedAvatarAsset.file, fileName);
+      if (Platform.OS === 'web') {
+        if (selectedAvatarAsset.file) {
+          formData.append('file', selectedAvatarAsset.file, fileName);
+        } else {
+          const blob = await fetch(selectedAvatarAsset.uri).then((res) => res.blob());
+          const file = new File([blob], fileName, { type: contentType });
+          formData.append('file', file, fileName);
+        }
       } else {
-        const blob = await fetch(selectedAvatarAsset.uri).then((res) => res.blob());
-        const file = new File([blob], fileName, { type: contentType });
-        formData.append('file', file, fileName);
+        formData.append('file', {
+          uri: selectedAvatarAsset.uri,
+          name: fileName,
+          type: contentType,
+        });
       }
-    } else {
-      formData.append('file', {
-        uri: selectedAvatarAsset.uri,
-        name: fileName,
-        type: contentType,
+
+      formData.append('optimize', 'true');
+      const response = await api.post('/media_storage/images/', formData, {
+        timeout: 60000,
+        forceMultipart: true,
       });
+      const uploadedUrl = response?.data?.url;
+      if (!uploadedUrl) {
+        throw new Error('Avatar yukleme yanitinda url bulunamadi.');
+      }
+      return uploadedUrl;
+    } catch (error) {
+      const backendMessage =
+        error?.response?.data?.error ||
+        error?.response?.data?.detail ||
+        (Array.isArray(error?.response?.data?.file) ? error.response.data.file[0] : null) ||
+        error?.message;
+      throw new Error(backendMessage || 'Avatar yuklenemedi.');
     }
-
-    formData.append('optimize', 'true');
-    const response = await api.post('/media_storage/images/', formData);
-
-    return response?.data?.url || '';
   };
 
   const handlePickAvatar = async () => {
@@ -160,7 +180,10 @@ export default function EditProfileScreen() {
     } catch (error) {
       const message =
         error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (Array.isArray(error?.response?.data?.file) ? error.response.data.file[0] : null) ||
         error?.response?.data?.message ||
+        error?.message ||
         'Profil guncellenemedi.';
       setErrorMessage(message);
       if (Platform.OS !== 'web') {
@@ -169,6 +192,47 @@ export default function EditProfileScreen() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleDeleteAccount = () => {
+    const runDelete = async () => {
+      setErrorMessage('');
+      setIsDeleting(true);
+      try {
+        await deleteAccount();
+      } catch (error) {
+        const message =
+          error?.response?.data?.detail ||
+          error?.response?.data?.error ||
+          'Hesap silinirken bir hata olustu.';
+        setErrorMessage(message);
+        if (Platform.OS !== 'web') {
+          Alert.alert('Hata', message);
+        }
+      } finally {
+        setIsDeleting(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed =
+        typeof window !== 'undefined'
+          ? window.confirm(
+              'Hesabin kalici olarak silinecek. Bu islem geri alinamaz. Devam etmek istiyor musun?'
+            )
+          : false;
+      if (confirmed) runDelete();
+      return;
+    }
+
+    Alert.alert(
+      'Hesabi Sil',
+      'Hesabin kalici olarak silinecek. Bu islem geri alinamaz.',
+      [
+        { text: 'Iptal', style: 'cancel' },
+        { text: 'Sil', style: 'destructive', onPress: runDelete },
+      ]
+    );
   };
 
   return (
@@ -335,7 +399,7 @@ export default function EditProfileScreen() {
             <TouchableOpacity
               style={[styles.button, styles.cancelButton]}
               onPress={() => navigation.goBack()}
-              disabled={isSaving}
+              disabled={isSaving || isDeleting}
             >
               <Text style={styles.cancelButtonText}>Vazgec</Text>
             </TouchableOpacity>
@@ -343,7 +407,7 @@ export default function EditProfileScreen() {
             <TouchableOpacity
               style={[styles.button, styles.saveButton, isSaving && styles.disabled]}
               onPress={handleSave}
-              disabled={isSaving}
+              disabled={isSaving || isDeleting}
             >
               {isSaving ? (
                 <ActivityIndicator color="#fff" />
@@ -352,6 +416,18 @@ export default function EditProfileScreen() {
               )}
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            style={[styles.deleteAccountButton, isDeleting && styles.disabled]}
+            onPress={handleDeleteAccount}
+            disabled={isSaving || isDeleting}
+          >
+            {isDeleting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.deleteAccountText}>Hesabi Sil</Text>
+            )}
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -626,6 +702,21 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.7,
+  },
+  deleteAccountButton: {
+    marginTop: 12,
+    minHeight: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#b3413a',
+    borderWidth: 1,
+    borderColor: '#9f3731',
+  },
+  deleteAccountText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '900',
   },
   errorContainer: {
     backgroundColor: '#fff1ee',

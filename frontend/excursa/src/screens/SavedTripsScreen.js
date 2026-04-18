@@ -18,6 +18,7 @@ import {
   Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { useTrips } from '../hooks/useTrips';
 import useTripStore from '../store/tripStore';
 import TripService from '../services/TripService';
@@ -71,6 +72,13 @@ export default function SavedTripsScreen({ navigation }) {
     (trip) => trip?.status === 'COMPLETED' || trip?.status === 'ARCHIVED'
   );
 
+  // Keep trip sections up-to-date when returning from builder/edit screens.
+  useFocusEffect(
+    useCallback(() => {
+      refetchTrips();
+    }, [refetchTrips])
+  );
+
   /**
    * Handle pull-to-refresh
    */
@@ -122,7 +130,7 @@ export default function SavedTripsScreen({ navigation }) {
   const handleEditTrip = useCallback(async () => {
     if (!selectedTrip) return;
     setShowTripDetails(false);
-    navigation.navigate('IterinaryBuilder', { tripId: selectedTrip.id });
+    navigation.navigate('IterinaryBuilder', { tripId: selectedTrip.id, mode: 'edit' });
   }, [selectedTrip, navigation]);
 
   /**
@@ -397,7 +405,7 @@ export default function SavedTripsScreen({ navigation }) {
       {activeTab !== TRIP_TABS.PAST && (
         <TouchableOpacity
           style={styles.createButton}
-          onPress={() => navigation.navigate('IterinaryBuilder')}
+          onPress={() => navigation.navigate('IterinaryBuilder', { tripId: null, mode: 'create' })}
         >
           <Text style={styles.createButtonText}>+ Yeni Rota Oluştur</Text>
         </TouchableOpacity>
@@ -424,7 +432,7 @@ export default function SavedTripsScreen({ navigation }) {
         </View>
         <TouchableOpacity
           style={styles.createTopButton}
-          onPress={() => navigation.navigate('IterinaryBuilder')}
+          onPress={() => navigation.navigate('IterinaryBuilder', { tripId: null, mode: 'create' })}
         >
           <Text style={styles.createTopButtonText}>+ Yeni</Text>
         </TouchableOpacity>

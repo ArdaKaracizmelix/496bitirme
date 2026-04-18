@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from .models import UserProfile, FollowRelation
 from .services import generate_email_verification_token
+from community.models import SocialPost
 
 User = get_user_model()
 
@@ -163,6 +164,75 @@ class UserAPITests(APITestCase):
         self.assertEqual(response.data['count'], 1)
         self.assertEqual(len(response.data['results']), 1)
         self.assertEqual(response.data['results'][0]['id'], str(self.profile2.id))
+
+    def test_me_endpoint_returns_live_follow_counts(self):
+        """Me endpoint should return counts computed from follow relations."""
+        self.profile1.follow(self.profile2)
+        self.profile1.refresh_from_db()
+        self.profile2.refresh_from_db()
+
+        # Corrupt denormalized counters intentionally.
+        self.profile1.following_count = 99
+        self.profile1.followers_count = 77
+        self.profile1.save(update_fields=['following_count', 'followers_count'])
+
+        response = self.client.get(reverse('me'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['following_count'], 1)
+        self.assertEqual(response.data['followers_count'], 0)
+
+    def test_delete_me_deletes_account_and_social_data(self):
+        """Deleting /user/me/ removes user account and related social content."""
+        follower_user = User.objects.create_user(username='api_user3', password='password123')
+        follower_profile = UserProfile.objects.create(user=follower_user)
+
+        # follower_profile -> profile1 and profile1 -> profile2
+        follower_profile.follow(self.profile1)
+        self.profile1.follow(self.profile2)
+        follower_profile.refresh_from_db()
+        self.profile1.refresh_from_db()
+        self.profile2.refresh_from_db()
+        self.assertEqual(follower_profile.following_count, 1)
+        self.assertEqual(self.profile2.followers_count, 1)
+
+        owned_post = SocialPost(
+            user_ref_id=self.profile1.id,
+            content="Owned post",
+            visibility="PUBLIC",
+        )
+        owned_post.save()
+
+        other_post = SocialPost(
+            user_ref_id=self.profile2.id,
+            content="Other post",
+            visibility="PUBLIC",
+            likes=[self.profile1.id],
+            saved_by=[self.profile1.id],
+        )
+        other_post.add_comment(self.profile1.id, "test")
+        other_post.save()
+
+        try:
+            url = reverse('me')
+            response = self.client.delete(url)
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+            self.assertFalse(User.objects.filter(id=self.user1.id).exists())
+            self.assertFalse(UserProfile.objects.filter(id=self.profile1.id).exists())
+            self.assertFalse(SocialPost.objects(id=owned_post.id).first())
+
+            refreshed_other = SocialPost.objects(id=other_post.id).first()
+            self.assertIsNotNone(refreshed_other)
+            self.assertNotIn(self.profile1.id, refreshed_other.likes)
+            self.assertNotIn(self.profile1.id, refreshed_other.saved_by)
+            self.assertFalse(any(c.user_id == self.profile1.id for c in refreshed_other.comments))
+
+            follower_profile.refresh_from_db()
+            self.profile2.refresh_from_db()
+            self.assertEqual(follower_profile.following_count, 0)
+            self.assertEqual(self.profile2.followers_count, 0)
+        finally:
+            SocialPost.objects(id__in=[owned_post.id, other_post.id]).delete()
 
 
 class EmailVerificationAuthTests(APITestCase):

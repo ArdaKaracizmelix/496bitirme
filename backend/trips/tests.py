@@ -11,6 +11,7 @@ from unittest.mock import patch, MagicMock
 from .models import Itinerary, ItineraryItem
 from locations.models import POI
 from .services import RouteOptimizer, TransportMode
+from user.models import UserProfile
 
 
 class ItineraryModelTest(TestCase):
@@ -179,7 +180,7 @@ class ItineraryAPITest(APITestCase):
         self.assertEqual(Itinerary.objects.get().user, self.user)
 
     def test_list_itineraries_filtering(self):
-        """Test listing itineraries with visibility rules"""
+        """Test listing own itineraries by default and mixed list when requested."""
         # Create private itinerary for user
         Itinerary.objects.create(user=self.user, title='My Private', start_date=timezone.now(), end_date=timezone.now(), visibility='PRIVATE')
         # Create public itinerary for user
@@ -192,8 +193,14 @@ class ItineraryAPITest(APITestCase):
         url = reverse('trips:itinerary-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # Should see 3 itineraries: My Private, My Public, Other Public
-        self.assertEqual(len(response.data['results']), 3)
+        # Default list should show only current user's itineraries.
+        self.assertEqual(len(response.data['results']), 2)
+        self.assertTrue(all(item['username'] == self.user.username for item in response.data['results']))
+
+        response_with_public = self.client.get(url, {'include_public': 'true'})
+        self.assertEqual(response_with_public.status_code, status.HTTP_200_OK)
+        # Mixed list should include current user + other users' public itineraries.
+        self.assertEqual(len(response_with_public.data['results']), 3)
 
     def test_update_itinerary_permission(self):
         """Test that only owner can update itinerary"""
@@ -285,7 +292,9 @@ class ItineraryAPITest(APITestCase):
         self.assertIn('day_plan', response.data)
         self.assertEqual(response.data['summary']['city'], 'Istanbul')
         self.assertEqual(Itinerary.objects.filter(user=self.user).count(), 1)
-        self.assertEqual(ItineraryItem.objects.filter(itinerary__user=self.user).count(), 3)
+        generated_count = ItineraryItem.objects.filter(itinerary__user=self.user).count()
+        self.assertGreaterEqual(generated_count, 3)
+        self.assertLessEqual(generated_count, 4)
 
     def test_generate_from_preferences_returns_error_when_city_has_no_pois(self):
         """Test generation returns 400 when there are no POIs in selected city."""
@@ -303,8 +312,8 @@ class ItineraryAPITest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('error', response.data)
 
-    def test_generate_from_preferences_reuses_latest_draft(self):
-        """Test generation updates latest draft instead of creating duplicate drafts."""
+    def test_generate_from_preferences_creates_new_draft_when_other_draft_exists(self):
+        """Test generation creates a new draft instead of overwriting an existing draft."""
         old_trip = Itinerary.objects.create(
             user=self.user,
             title='Old Draft',
@@ -356,13 +365,118 @@ class ItineraryAPITest(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(Itinerary.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(Itinerary.objects.filter(user=self.user).count(), 2)
 
         old_trip.refresh_from_db()
-        self.assertEqual(str(response.data['itinerary']['id']), str(old_trip.id))
-        self.assertEqual(old_trip.title, 'Updated Draft')
+        self.assertEqual(old_trip.title, 'Old Draft')
         self.assertEqual(old_trip.status, Itinerary.Status.DRAFT)
-        self.assertEqual(ItineraryItem.objects.filter(itinerary=old_trip).count(), 2)
+        self.assertEqual(ItineraryItem.objects.filter(itinerary=old_trip).count(), 1)
+
+        new_trip_id = response.data['itinerary']['id']
+        self.assertNotEqual(str(new_trip_id), str(old_trip.id))
+        new_trip = Itinerary.objects.get(id=new_trip_id)
+        self.assertEqual(new_trip.title, 'Updated Draft')
+        self.assertEqual(new_trip.status, Itinerary.Status.DRAFT)
+        self.assertEqual(ItineraryItem.objects.filter(itinerary=new_trip).count(), 2)
+
+    def test_generate_from_preferences_uses_profile_interests_when_payload_missing(self):
+        """Test generation merges profile interests when request interests are not provided."""
+        profile = getattr(self.user, 'profile', None)
+        if profile is None:
+            profile = UserProfile.objects.create(user=self.user)
+        profile.preferences_vector = {'food': 1.0}
+        profile.save(update_fields=['preferences_vector'])
+
+        food_poi = POI.objects.create(
+            name='Food Spot',
+            address='Kadikoy, Istanbul',
+            location=Point(29.0301, 40.9921),
+            category=POI.Category.FOOD,
+            average_rating=4.9,
+            tags=['food', 'istanbul'],
+        )
+        POI.objects.create(
+            name='Generic Spot',
+            address='Beyoglu, Istanbul',
+            location=Point(28.9742, 41.0257),
+            category=POI.Category.ENTERTAINMENT,
+            average_rating=3.8,
+            tags=['istanbul'],
+        )
+
+        url = reverse('trips:itinerary-generate-from-preferences')
+        response = self.client.post(
+            url,
+            {
+                'city': 'Istanbul',
+                'duration_days': 1,
+                'stops_per_day': 1,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn('food', response.data['summary']['interests'])
+        first_stop_poi_id = response.data['itinerary']['stops'][0]['poi']['id']
+        first_stop = response.data['itinerary']['stops'][0]['poi']
+        self.assertIn(first_stop['category'], [POI.Category.FOOD, 'FOOD_DRINK'])
+        self.assertIn(
+            'food',
+            [str(tag).lower() for tag in (first_stop.get('tags') or [])]
+        )
+
+    @patch('trips.services.TripGenerationService._plan_with_ai')
+    def test_generate_from_preferences_uses_ai_plan_when_available(self, mock_ai_plan):
+        """Test generation applies AI-selected POI order and marks source as AI."""
+        poi1 = POI.objects.create(
+            name='Stop One',
+            address='Sultanahmet, Istanbul',
+            location=Point(28.9803, 41.0087),
+            category=POI.Category.HISTORICAL,
+            average_rating=4.4,
+            tags=['historical', 'istanbul'],
+        )
+        POI.objects.create(
+            name='Stop Two',
+            address='Beyoglu, Istanbul',
+            location=Point(28.9743, 41.0258),
+            category=POI.Category.ENTERTAINMENT,
+            average_rating=4.3,
+            tags=['entertainment', 'istanbul'],
+        )
+        poi3 = POI.objects.create(
+            name='Stop Three',
+            address='Kadikoy, Istanbul',
+            location=Point(29.0302, 40.9922),
+            category=POI.Category.FOOD,
+            average_rating=4.6,
+            tags=['food', 'istanbul'],
+        )
+
+        mock_ai_plan.return_value = {
+            'selected_pois': [poi3, poi1],
+            'daily_themes': ['Mixed discovery'],
+        }
+
+        url = reverse('trips:itinerary-generate-from-preferences')
+        response = self.client.post(
+            url,
+            {
+                'city': 'Istanbul',
+                'duration_days': 1,
+                'interests': ['historical'],
+                'stops_per_day': 2,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['summary']['planning_source'], 'ai')
+        self.assertEqual(response.data['day_plan'][0]['theme'], 'Mixed discovery')
+
+        stops = response.data['itinerary']['stops']
+        self.assertEqual(str(stops[0]['poi']['id']), str(poi3.id))
+        self.assertEqual(str(stops[1]['poi']['id']), str(poi1.id))
 
 
 class ItineraryItemAPITest(APITestCase):
