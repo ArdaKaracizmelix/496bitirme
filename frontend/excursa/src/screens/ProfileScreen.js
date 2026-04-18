@@ -112,6 +112,7 @@ export default function ProfileScreen({ route }) {
   const followMutation = useFollowUser();
   const unfollowMutation = useUnfollowUser();
   const [activeTab, setActiveTab] = useState('journey');
+  const [isActionsOpen, setIsActionsOpen] = useState(false);
   const isCompact = width < 390;
   const contentMaxWidth = width >= 900 ? 720 : 640;
 
@@ -181,6 +182,7 @@ export default function ProfileScreen({ route }) {
   );
 
   const handleLogout = () => {
+    setIsActionsOpen(false);
     const runLogout = async () => {
       try {
         await logout();
@@ -222,19 +224,25 @@ export default function ProfileScreen({ route }) {
     }
   };
 
-  const handleProfileMenu = () => {
+  const handleSettingsPress = () => {
     if (!isOwnProfile) return;
-
-    if (Platform.OS === 'web') {
-      Alert.alert('Ayarlar', 'Ayarlar sayfasi yakinda gelecek.');
+    setIsActionsOpen(false);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.alert('Ayarlar sayfasi yakinda gelecek.');
       return;
     }
+    Alert.alert('Ayarlar', 'Ayarlar sayfasi yakinda gelecek.');
+  };
 
-    Alert.alert('Profil', 'Profil islemleri', [
-      { text: 'Ayarlar', onPress: () => Alert.alert('Ayarlar', 'Ayarlar sayfasi yakinda gelecek.') },
-      { text: 'Cikis Yap', style: 'destructive', onPress: handleLogout },
-      { text: 'Iptal', style: 'cancel' },
-    ]);
+  const handleEditProfilePress = () => {
+    if (!isOwnProfile) return;
+    setIsActionsOpen(false);
+    navigation.navigate('EditProfile');
+  };
+
+  const toggleProfileActions = () => {
+    if (!isOwnProfile) return;
+    setIsActionsOpen((value) => !value);
   };
 
   const openFollowList = (initialTab) => {
@@ -272,8 +280,14 @@ export default function ProfileScreen({ route }) {
             </View>
           </View>
           {isOwnProfile ? (
-            <TouchableOpacity style={styles.menuButton} onPress={handleProfileMenu}>
-              <Text style={styles.menuButtonText}>...</Text>
+            <TouchableOpacity
+              style={[styles.menuButton, isActionsOpen && styles.menuButtonActive]}
+              onPress={toggleProfileActions}
+              activeOpacity={0.86}
+            >
+              <Text style={[styles.menuButtonText, isActionsOpen && styles.menuButtonTextActive]}>
+                {isActionsOpen ? 'Kapat' : 'Menu'}
+              </Text>
             </TouchableOpacity>
           ) : profileData?.is_verified ? (
             <View style={styles.verifiedBadge}>
@@ -285,6 +299,30 @@ export default function ProfileScreen({ route }) {
         <Text style={styles.profileBio}>
           {userProfile.bio || 'Bu profil henuz bio eklemedi; paylastigi rotalar ve notlar burada karakterini gosterecek.'}
         </Text>
+
+        {isOwnProfile && isActionsOpen ? (
+          <View style={styles.actionsPanel}>
+            <ProfileActionRow
+              label="Ayarlar"
+              description="Bildirim, hesap ve uygulama tercihleri"
+              icon="A"
+              onPress={handleSettingsPress}
+            />
+            <ProfileActionRow
+              label="Profili Duzenle"
+              description="Foto, bio ve gorunen profil bilgileri"
+              icon="P"
+              onPress={handleEditProfilePress}
+            />
+            <ProfileActionRow
+              label="Cikis Yap"
+              description="Bu cihazdaki oturumu kapat"
+              icon="!"
+              destructive
+              onPress={handleLogout}
+            />
+          </View>
+        ) : null}
 
         <View style={styles.summaryStrip}>
           {profileSummary.map((item, index) => {
@@ -315,36 +353,27 @@ export default function ProfileScreen({ route }) {
           })}
         </View>
 
-        <View style={styles.actionButtons}>
-          {isOwnProfile ? (
+        {!isOwnProfile ? (
+          <View style={styles.actionButtons}>
             <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => navigation.navigate('EditProfile')}
+              style={[
+                styles.actionButton,
+                isFollowing && styles.followingButton,
+                isFollowUpdating && styles.actionDisabled,
+              ]}
+              onPress={handleFollowToggle}
+              disabled={isFollowUpdating}
             >
-              <Text style={styles.actionButtonText}>Profili Duzenle</Text>
+              {isFollowUpdating ? (
+                <ActivityIndicator size="small" color={isFollowing ? '#1a1a2e' : '#fff'} />
+              ) : (
+                <Text style={isFollowing ? styles.followingButtonText : styles.actionButtonText}>
+                  {isFollowing ? 'Baglantida' : 'Takip Et'}
+                </Text>
+              )}
             </TouchableOpacity>
-          ) : (
-            <>
-              <TouchableOpacity
-                style={[
-                  styles.actionButton,
-                  isFollowing && styles.followingButton,
-                  isFollowUpdating && styles.actionDisabled,
-                ]}
-                onPress={handleFollowToggle}
-                disabled={isFollowUpdating}
-              >
-                {isFollowUpdating ? (
-                  <ActivityIndicator size="small" color={isFollowing ? '#1a1a2e' : '#fff'} />
-                ) : (
-                  <Text style={isFollowing ? styles.followingButtonText : styles.actionButtonText}>
-                    {isFollowing ? 'Baglantida' : 'Takip Et'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.sectionIntro}>
@@ -447,6 +476,33 @@ export default function ProfileScreen({ route }) {
         scrollIndicatorInsets={{ right: 1 }}
       />
     </SafeAreaView>
+  );
+}
+
+function ProfileActionRow({ label, description, icon, destructive = false, onPress }) {
+  return (
+    <TouchableOpacity
+      style={[styles.profileActionRow, destructive && styles.profileActionRowDanger]}
+      onPress={onPress}
+      activeOpacity={0.86}
+    >
+      <View style={[styles.profileActionIcon, destructive && styles.profileActionIconDanger]}>
+        <Text style={[styles.profileActionIconText, destructive && styles.profileActionIconTextDanger]}>
+          {icon}
+        </Text>
+      </View>
+      <View style={styles.profileActionCopy}>
+        <Text style={[styles.profileActionLabel, destructive && styles.profileActionLabelDanger]}>
+          {label}
+        </Text>
+        <Text style={styles.profileActionDescription} numberOfLines={1}>
+          {description}
+        </Text>
+      </View>
+      <Text style={[styles.profileActionArrow, destructive && styles.profileActionLabelDanger]}>
+        {'>'}
+      </Text>
+    </TouchableOpacity>
   );
 }
 
@@ -608,27 +664,109 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   menuButton: {
-    width: 38,
+    minWidth: 72,
     height: 38,
-    borderRadius: 19,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#f4eddf',
     borderWidth: 1,
     borderColor: '#e1d5bf',
+    paddingHorizontal: 12,
+  },
+  menuButtonActive: {
+    backgroundColor: '#1a1a2e',
+    borderColor: '#1a1a2e',
   },
   menuButtonText: {
     color: '#1a1a2e',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '900',
-    letterSpacing: 1,
-    marginTop: -3,
+    letterSpacing: 0.2,
+  },
+  menuButtonTextActive: {
+    color: '#fffdf8',
   },
   profileBio: {
     color: '#302e3f',
     fontSize: 14,
     lineHeight: 21,
     marginTop: 14,
+  },
+  actionsPanel: {
+    marginTop: 14,
+    borderRadius: 22,
+    padding: 8,
+    backgroundColor: '#f7f3ea',
+    borderWidth: 1,
+    borderColor: '#e6dccb',
+    shadowColor: '#1a1a2e',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.05,
+    shadowRadius: 18,
+    elevation: 2,
+  },
+  profileActionRow: {
+    minHeight: 62,
+    borderRadius: 17,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fffdf8',
+    borderWidth: 1,
+    borderColor: '#eee5d7',
+    marginBottom: 8,
+  },
+  profileActionRowDanger: {
+    backgroundColor: '#fff4f1',
+    borderColor: '#efd2cc',
+    marginBottom: 0,
+  },
+  profileActionIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1a1a2e',
+    marginRight: 11,
+  },
+  profileActionIconDanger: {
+    backgroundColor: '#ffe2dc',
+  },
+  profileActionIconText: {
+    color: '#d7c49e',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  profileActionIconTextDanger: {
+    color: '#b94a3f',
+  },
+  profileActionCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  profileActionLabel: {
+    color: '#1a1a2e',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  profileActionLabelDanger: {
+    color: '#b94a3f',
+  },
+  profileActionDescription: {
+    color: '#746b5e',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  profileActionArrow: {
+    color: '#9b8356',
+    fontSize: 20,
+    fontWeight: '900',
+    marginLeft: 8,
   },
   interestRail: {
     flexDirection: 'row',

@@ -19,6 +19,7 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import SocialPostCard from '../components/SocialPostCard';
 import { useDeletePost, useFeed, useSavedPosts, useToggleLike, useToggleSave } from '../hooks/useSocial';
+import { useUnreadNotifications } from '../hooks/useNotifications';
 import useAuthStore from '../store/authStore';
 import { buildPostLink, copyTextToClipboard } from '../utils/linkUtils';
 
@@ -66,6 +67,7 @@ export default function CommunityFeedScreen() {
   const currentUserId = user?.id || user?.profile_id || user?.profile?.id;
   const feedQuery = useFeed(activeList === 'feed');
   const savedPostsQuery = useSavedPosts(activeList === 'saved');
+  const unreadNotificationsQuery = useUnreadNotifications();
   const {
     data,
     isLoading,
@@ -132,6 +134,7 @@ export default function CommunityFeedScreen() {
   const feedBottomPadding = fabBottom + 74;
 
   const contentMaxWidth = width >= 900 ? 720 : 640;
+  const unreadNotifications = Number(unreadNotificationsQuery.data) || 0;
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -299,6 +302,10 @@ export default function CommunityFeedScreen() {
     }
   }, []);
 
+  const handleNotificationsPress = useCallback(() => {
+    navigation.navigate('Notifications');
+  }, [navigation]);
+
   const headerComponent = useMemo(() => (
     <View style={[styles.headerWrap, { maxWidth: contentMaxWidth }]}>
       <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
@@ -323,6 +330,20 @@ export default function CommunityFeedScreen() {
             style={[styles.topSearchInput, Platform.OS === 'web' && styles.topSearchInputWeb]}
           />
         </View>
+        <TouchableOpacity
+          style={styles.notificationButton}
+          activeOpacity={0.86}
+          onPress={handleNotificationsPress}
+        >
+          <Text style={styles.notificationIcon}>!</Text>
+          {unreadNotifications > 0 ? (
+            <View style={styles.notificationBadge}>
+              <Text style={styles.notificationBadgeText}>
+                {unreadNotifications > 9 ? '9+' : unreadNotifications}
+              </Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
       </View>
 
       {userSearchQuery.trim() ? (
@@ -376,7 +397,7 @@ export default function CommunityFeedScreen() {
       />
 
     </View>
-  ), [contentMaxWidth, isCompact, userSearchQuery, suggestedUsers, handleQuickAction, handleSuggestedUserPress, handleSearchFocus, activeList]);
+  ), [contentMaxWidth, isCompact, userSearchQuery, suggestedUsers, handleQuickAction, handleSuggestedUserPress, handleSearchFocus, handleNotificationsPress, activeList, unreadNotifications]);
 
   const renderState = (title, subtitle, actionLabel, action) => (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -637,7 +658,7 @@ const styles = StyleSheet.create({
   },
   topSearchWrap: {
     height: 42,
-    minWidth: 156,
+    minWidth: 126,
     maxWidth: 220,
     flex: 1,
     borderRadius: 14,
@@ -666,6 +687,43 @@ const styles = StyleSheet.create({
   topSearchInputWeb: {
     outlineStyle: 'none',
     boxShadow: 'none',
+  },
+  notificationButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1a1a2e',
+    shadowColor: '#1a1a2e',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  notificationIcon: {
+    color: '#fffdf8',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    minWidth: 19,
+    height: 19,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+    backgroundColor: '#d43f57',
+    borderWidth: 2,
+    borderColor: '#f7f3ea',
+  },
+  notificationBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '900',
   },
   topSuggestionsWrap: {
     alignSelf: 'flex-end',

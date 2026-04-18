@@ -15,6 +15,7 @@ from .serializers import (
     AddCommentSerializer, FeedSerializer
 )
 from .services import FeedService
+from notifications.services import NotificationService
 import uuid
 
 
@@ -308,6 +309,8 @@ class SocialPostViewSet(viewsets.ViewSet):
             serializer = AddCommentSerializer(data=request.data)
             if serializer.is_valid():
                 post.add_comment(request.user.profile.id, serializer.validated_data['text'])
+                comment = post.comments[-1] if post.comments else None
+                NotificationService.notify_post_comment(post, comment, request.user.profile)
                 response = PostDTO(self.service._post_to_dto(post, current_user_id=self._viewer_profile_id(request)))
                 return Response(response.data)
             
@@ -336,6 +339,8 @@ class SocialPostViewSet(viewsets.ViewSet):
                 )
             
             liked = post.toggle_like(request.user.profile.id)
+            if liked:
+                NotificationService.notify_post_like(post, request.user.profile)
             
             return Response({
                 'liked': liked,
@@ -395,6 +400,8 @@ class SocialPostViewSet(viewsets.ViewSet):
                 )
 
             saved = post.toggle_save(request.user.profile.id)
+            if saved:
+                NotificationService.notify_post_save(post, request.user.profile)
 
             return Response({
                 'saved': saved,

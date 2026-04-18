@@ -6,9 +6,215 @@ import logging
 from typing import List, Optional
 from django.db import transaction
 
-from .models import DeviceToken, Notification
+from .models import DeviceToken, Notification, NotificationCategory, NotificationVerb
+from user.models import UserProfile
 
 logger = logging.getLogger(__name__)
+
+
+def _profile_display_name(profile: Optional[UserProfile]) -> str:
+    if not profile:
+        return "Excursa"
+    full_name = f"{profile.user.first_name} {profile.user.last_name}".strip()
+    return full_name or profile.user.username or "Gezgin"
+
+
+def _post_owner(post) -> Optional[UserProfile]:
+    try:
+        return UserProfile.objects.select_related("user").filter(id=post.user_ref_id).first()
+    except Exception:
+        return None
+
+
+def _post_ref(post) -> str:
+    return str(getattr(post, "id", "") or "")
+
+
+def _is_route_post(post) -> bool:
+    route_data = getattr(post, "route_data", None)
+    tags = getattr(post, "tags", None) or []
+    return bool(route_data) or "trip-share" in tags or "route" in tags
+
+
+class NotificationService:
+    """
+    Domain service for creating in-app notifications.
+
+    Views and domain actions call this service instead of building notification
+    records inline, so future push dispatch or aggregation can be added here.
+    """
+
+    @classmethod
+    def create_notification(
+        cls,
+        *,
+        recipient: UserProfile,
+        verb: str,
+        title: str,
+        body: str,
+        actor: Optional[UserProfile] = None,
+        category: str = NotificationCategory.ACTIVITY,
+        target_object_id=None,
+        target_object_ref: str = "",
+        data: Optional[dict] = None,
+        dedupe_key: str = "",
+    ) -> Optional[Notification]:
+        if not recipient:
+            return None
+        if actor and str(actor.id) == str(recipient.id):
+            return None
+
+        payload = data or {}
+        defaults = {
+            "recipient": recipient,
+            "actor": actor,
+            "verb": verb,
+            "category": category,
+            "title": title,
+            "body": body,
+            "target_object_id": target_object_id,
+            "target_object_ref": str(target_object_ref or ""),
+            "data": payload,
+            "is_read": False,
+        }
+
+        with transaction.atomic():
+            if dedupe_key:
+                notification, _created = Notification.objects.update_or_create(
+                    recipient=recipient,
+                    dedupe_key=dedupe_key,
+                    defaults=defaults,
+                )
+                return notification
+
+            return Notification.objects.create(**defaults)
+
+    @classmethod
+    def notify_post_like(cls, post, actor: UserProfile):
+        owner = _post_owner(post)
+        ref = _post_ref(post)
+        if not owner or not ref:
+            return None
+
+        actor_name = _profile_display_name(actor)
+        is_route = _is_route_post(post)
+        verb = NotificationVerb.ROUTE_LIKE if is_route else NotificationVerb.POST_LIKE
+        category = NotificationCategory.ROUTES if is_route else NotificationCategory.ACTIVITY
+        title = f"{actor_name} liked your route" if is_route else f"{actor_name} liked your post"
+        body = "Your shared route is getting attention." if is_route else "Someone reacted to your travel moment."
+
+        return cls.create_notification(
+            recipient=owner,
+            actor=actor,
+            verb=verb,
+            category=category,
+            title=title,
+            body=body,
+            target_object_ref=ref,
+            dedupe_key=f"{verb}:{owner.id}:{actor.id}:{ref}",
+            data={
+                "screen": "PostDetail",
+                "post_id": ref,
+                "type": "route_like" if is_route else "post_like",
+            },
+        )
+
+    @classmethod
+    def notify_post_comment(cls, post, comment, actor: UserProfile):
+        owner = _post_owner(post)
+        ref = _post_ref(post)
+        if not owner or not ref:
+            return None
+
+        actor_name = _profile_display_name(actor)
+        is_route = _is_route_post(post)
+        verb = NotificationVerb.ROUTE_COMMENT if is_route else NotificationVerb.POST_COMMENT
+        category = NotificationCategory.ROUTES if is_route else NotificationCategory.ACTIVITY
+        title = f"{actor_name} commented on your route" if is_route else f"{actor_name} commented on your post"
+        comment_text = str(getattr(comment, "text", "") or "").strip()
+        body = comment_text[:140] if comment_text else "Open the conversation to see the new comment."
+
+        return cls.create_notification(
+            recipient=owner,
+            actor=actor,
+            verb=verb,
+            category=category,
+            title=title,
+            body=body,
+            target_object_ref=ref,
+            dedupe_key=f"{verb}:{owner.id}:{actor.id}:{ref}:{getattr(comment, 'timestamp', '')}",
+            data={
+                "screen": "PostDetail",
+                "post_id": ref,
+                "type": "route_comment" if is_route else "post_comment",
+            },
+        )
+
+    @classmethod
+    def notify_post_save(cls, post, actor: UserProfile):
+        owner = _post_owner(post)
+        ref = _post_ref(post)
+        if not owner or not ref:
+            return None
+
+        actor_name = _profile_display_name(actor)
+        is_route = _is_route_post(post)
+        verb = NotificationVerb.ROUTE_SAVE if is_route else NotificationVerb.POST_SAVE
+        category = NotificationCategory.ROUTES if is_route else NotificationCategory.ACTIVITY
+        title = f"{actor_name} saved your route" if is_route else f"{actor_name} saved your post"
+        body = "Your route is useful enough to revisit later." if is_route else "Your post was saved for later."
+
+        return cls.create_notification(
+            recipient=owner,
+            actor=actor,
+            verb=verb,
+            category=category,
+            title=title,
+            body=body,
+            target_object_ref=ref,
+            dedupe_key=f"{verb}:{owner.id}:{actor.id}:{ref}",
+            data={
+                "screen": "PostDetail",
+                "post_id": ref,
+                "type": "route_save" if is_route else "post_save",
+            },
+        )
+
+    @classmethod
+    def notify_follow(cls, follower: UserProfile, followed: UserProfile):
+        follower_name = _profile_display_name(follower)
+        return cls.create_notification(
+            recipient=followed,
+            actor=follower,
+            verb=NotificationVerb.FOLLOW,
+            category=NotificationCategory.ACTIVITY,
+            title=f"{follower_name} started following you",
+            body="You have a new travel companion on Excursa.",
+            target_object_id=follower.id,
+            target_object_ref=str(follower.id),
+            dedupe_key=f"{NotificationVerb.FOLLOW}:{followed.id}:{follower.id}",
+            data={
+                "screen": "UserProfile",
+                "profile_id": str(follower.id),
+                "type": "follow",
+            },
+        )
+
+    @classmethod
+    def notify_welcome(cls, profile: UserProfile):
+        return cls.create_notification(
+            recipient=profile,
+            actor=None,
+            verb=NotificationVerb.WELCOME,
+            category=NotificationCategory.SYSTEM,
+            title="Welcome to Excursa",
+            body="Your account is verified. Pick your interests, follow travelers, and start building routes.",
+            dedupe_key=f"{NotificationVerb.WELCOME}:{profile.id}",
+            data={
+                "screen": "InterestSelection",
+                "type": "welcome",
+            },
+        )
 
 # Firebase Admin SDK import 
 try:

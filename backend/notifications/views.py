@@ -2,10 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.shortcuts import get_object_or_404
-from django.db.models import Q
-from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
+from django.utils import timezone
 
 from .models import Notification, DeviceToken, NotificationVerb
 from .serializers import (
@@ -66,6 +63,10 @@ class NotificationViewSet(viewsets.ModelViewSet):
             verb = self.request.query_params.get('verb')
             if verb and verb in NotificationVerb.values:
                 queryset = queryset.filter(verb=verb)
+
+            category = self.request.query_params.get('category')
+            if category:
+                queryset = queryset.filter(category=category.upper())
             
             return queryset.order_by('-created_at')
         except:
@@ -73,6 +74,10 @@ class NotificationViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """Create a notification"""
+        if not self.request.user.is_staff:
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied('Only staff users can create system notifications.')
         serializer.save()
     
     def perform_destroy(self, instance):
@@ -105,7 +110,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
             updated_count, _ = Notification.objects.filter(
                 recipient=user_profile,
                 is_read=False
-            ).update(is_read=True)
+            ).update(is_read=True, updated_at=timezone.now())
             
             return Response(
                 {'message': f'Marked {updated_count} notifications as read'},
@@ -158,9 +163,9 @@ class NotificationViewSet(viewsets.ModelViewSet):
             )
             
             if action_type == 'mark_as_read':
-                updated_count, _ = queryset.update(is_read=True)
+                updated_count, _ = queryset.update(is_read=True, updated_at=timezone.now())
             elif action_type == 'mark_as_unread':
-                updated_count, _ = queryset.update(is_read=False)
+                updated_count, _ = queryset.update(is_read=False, updated_at=timezone.now())
             elif action_type == 'delete':
                 updated_count, _ = queryset.delete()
             else:
