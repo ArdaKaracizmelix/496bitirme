@@ -174,6 +174,8 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
     }
 
     try {
+      store.setGenerating(true);
+
       const userInterests = Array.isArray(user?.interests)
         ? user.interests
             .map((item) => {
@@ -216,6 +218,8 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
       Alert.alert('Başarılı', `Rota oluşturuldu. ${selectedCount} popüler durak eklendi.`);
     } catch (error) {
       Alert.alert('Hata', error?.message || 'Rota oluşturulamadı');
+    } finally {
+      store.setGenerating(false);
     }
   }, [
     cityQuery,

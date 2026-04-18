@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class LLMClient:
     def __init__(self):
         self.api_key = os.getenv("LLM_API_KEY")
@@ -17,28 +18,28 @@ class LLMClient:
         if not self.model:
             raise ValueError("LLM_MODEL bulunamadı.")
 
-    def generate_response(self, messages, temperature=0.7, max_tokens=300):
+    def generate_response(self, messages, temperature=0.7, max_tokens=2000, **extra_payload):
         url = f"{self.api_url}/chat/completions"
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         payload = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens
+            "max_tokens": max_tokens,
+            **extra_payload,
         }
 
         response = requests.post(
             url,
             headers=headers,
             json=payload,
-            timeout=60
+            timeout=60,
         )
-
         response.raise_for_status()
 
         data = response.json()
@@ -51,9 +52,8 @@ class LLMClient:
         content = message.get("content")
 
         if isinstance(content, str) and content.strip():
-            return content
+            return content.strip()
 
-        # Some providers return a content-part list.
         if isinstance(content, list):
             parts = []
             for part in content:
@@ -61,26 +61,19 @@ class LLMClient:
                     parts.append(part)
                 elif isinstance(part, dict):
                     text = part.get("text")
-                    if isinstance(text, str):
+                    if isinstance(text, str) and text.strip():
                         parts.append(text)
-            joined = "\n".join([p for p in parts if p and p.strip()]).strip()
+            joined = "\n".join(parts).strip()
             if joined:
                 return joined
 
-        # Some providers (including reasoning-capable adapters) may put output
-        # into a separate reasoning field while content is empty.
-        reasoning = message.get("reasoning")
-        if isinstance(reasoning, str) and reasoning.strip():
-            return reasoning
-
-        # Other provider variants (text completion style)
         text = first.get("text")
         if isinstance(text, str) and text.strip():
-            return text
+            return text.strip()
 
         delta = first.get("delta") or {}
         delta_content = delta.get("content")
         if isinstance(delta_content, str) and delta_content.strip():
-            return delta_content
+            return delta_content.strip()
 
         raise ValueError("LLM response content is empty")

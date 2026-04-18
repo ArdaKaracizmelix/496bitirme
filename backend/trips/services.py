@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 from enum import Enum
 import math
 import json
@@ -378,6 +378,93 @@ class TripGenerationService:
             return LLMClient()
         except Exception:
             return None
+
+
+    @staticmethod
+    def _generate_llm_json_response(llm_client, *, messages: List[Dict[str, Any]], max_tokens: int = 1200) -> str:
+        call_kwargs = {
+            'messages': messages,
+            'temperature': 0.0,
+            'max_tokens': max_tokens,
+        }
+
+        response_format_variants = [
+            {'type': 'json_object'},
+            {'type': 'json_schema', 'json_schema': {'name': 'itinerary_plan', 'schema': {'type': 'object'}}},
+        ]
+
+        for response_format in response_format_variants:
+            try:
+                return llm_client.generate_response(**call_kwargs, response_format=response_format)
+            except TypeError:
+                break
+            except Exception:
+                logger.exception('LLM JSON-mode call failed; falling back to next mode')
+
+        return llm_client.generate_response(**call_kwargs)
+
+    @classmethod
+    def _normalize_daily_locations(
+        cls,
+        *,
+        city: str,
+        duration_days: int,
+        daily_locations: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, str]]:
+        if not daily_locations:
+            return [
+                {'day': day + 1, 'location': city, 'notes': ''}
+                for day in range(duration_days)
+            ]
+
+        normalized_daily_locations = []
+        for index in range(duration_days):
+            raw_item = daily_locations[index] if index < len(daily_locations) else {}
+            if not isinstance(raw_item, dict):
+                raw_item = {'location': str(raw_item or '').strip()}
+            normalized_daily_locations.append(
+                {
+                    'day': index + 1,
+                    'location': str(raw_item.get('location') or city).strip() or city,
+                    'notes': str(raw_item.get('notes') or '').strip(),
+                }
+            )
+        return normalized_daily_locations
+
+    @classmethod
+    def _build_candidate_context(cls, candidate_pool: List[POI], city: str) -> List[Dict[str, Any]]:
+        candidate_context: List[Dict[str, Any]] = []
+        for poi in candidate_pool:
+            lat = None
+            lon = None
+            if getattr(poi, 'location', None):
+                try:
+                    lon = float(poi.location.x)
+                    lat = float(poi.location.y)
+                except Exception:
+                    lat = None
+                    lon = None
+
+            metadata = poi.metadata or {}
+            candidate_context.append(
+                {
+                    'candidate_id': int(poi.id),
+                    'name': poi.name,
+                    'address': str(poi.address or '').strip(),
+                    'category': str(poi.category or '').strip(),
+                    'tags': [str(tag).strip() for tag in (poi.tags or [])[:8] if str(tag).strip()],
+                    'latitude': lat,
+                    'longitude': lon,
+                    'area': (
+                        str(metadata.get('district') or '').strip()
+                        or str(metadata.get('locality') or '').strip()
+                        or str(metadata.get('city') or '').strip()
+                        or city
+                    ),
+                    'rating': float(poi.average_rating or 0.0),
+                }
+            )
+        return candidate_context
 
     @staticmethod
     def _extract_json_object(text: str) -> Dict[str, Any]:
@@ -1199,6 +1286,7 @@ class TripGenerationService:
         stops_per_day: int,
         ranked_pois: List[POI],
         max_stops: int,
+        daily_locations: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         llm_client = cls._build_llm_client()
         if llm_client is None:
@@ -1208,242 +1296,231 @@ class TripGenerationService:
         if not candidate_pool:
             return {'reason': 'no_candidates'}
 
+        daily_locations = cls._normalize_daily_locations(
+            city=city,
+            duration_days=duration_days,
+            daily_locations=daily_locations,
+        )
+        candidate_context = cls._build_candidate_context(candidate_pool, city)
+        candidate_map_by_id: Dict[int, POI] = {int(poi.id): poi for poi in candidate_pool}
+        candidate_map_by_name: Dict[str, POI] = {}
+        for poi in candidate_pool:
+            candidate_map_by_name.setdefault(cls._normalize_text(poi.name), poi)
+
+        system_prompt = f"""Return ONLY valid JSON.
+Do NOT write explanations.
+Do NOT write reasoning.
+Do NOT write markdown.
+Do NOT write code fences.
+Do NOT write any text outside the JSON object.
+The response must be parseable by json.loads().
+
+Schema:
+{{
+  "daily_themes": ["string"],
+  "days": [
+    {{
+      "day": 1,
+      "location": "string",
+      "focus": "string",
+      "pois": [
+        {{
+          "source": "candidate" or "new",
+          "candidate_id": 123,
+          "name": "string",
+          "address": "string",
+          "latitude": 0.0,
+          "longitude": 0.0,
+          "reason": "string"
+        }}
+      ]
+    }}
+  ]
+}}
+
+Rules:
+- Return exactly {duration_days} day objects.
+- Return exactly {stops_per_day} pois per day.
+- Prefer source="candidate" whenever a candidate fits well.
+- Use source="new" only when a strong, real, city-specific POI is missing from candidates.
+- For source="candidate", candidate_id must be one of the provided candidate_pois IDs.
+- For source="new", omit candidate_id or set it to null.
+- Never invent fake POIs.
+- Keep day locations aligned with the provided daily_locations.
+- Allowed top-level keys: daily_themes, days.
+- Allowed day keys: day, location, focus, pois.
+- Allowed poi keys: source, candidate_id, name, address, latitude, longitude, reason.
+"""
+
+        user_payload = {
+            'city': city,
+            'duration_days': duration_days,
+            'stops_per_day': stops_per_day,
+            'interests': interests,
+            'daily_locations': daily_locations,
+            'candidate_pois': candidate_context,
+        }
+        payload_json = json.dumps(user_payload, ensure_ascii=False)
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "⚠️ CRITICAL INSTRUCTIONS ⚠️\n\n"
-                    "Output ONLY POI lines. START IMMEDIATELY WITH THE FIRST LINE.\n"
-                    "NO preamble, NO thinking, NO reasoning, NO explanation.\n\n"
-                    "EXACT FORMAT (no variations):\n"
-                    "<name> | <address> | <lat,lon> | day <n>\n\n"
-                    "Example:\n"
-                    "Galata Tower | Galata, Istanbul | 41.0250,28.9820 | day 1\n"
-                    "Pierre Loti Café | Çamlıca, Istanbul | 41.0375,29.0210 | day 1\n"
-                    "Hagia Sophia | Sultanahmet, Istanbul | 41.0086,28.9802 | day 2\n\n"
-                    "MANDATORY RULES:\n"
-                    "• Output lines ONLY (no other text)\n"
-                    "• One POI per line\n"
-                    "• Real POI names only\n"
-                    "• NO JSON, NO markdown, NO asterisks\n"
-                    "• NO bullets or numbers\n"
-                    "• NO 'Day 1:', NO 'We need', NO 'Let's'\n"
-                    "• Leave address/coords empty if unknown (still use pipes)\n"
-                    "• Start typing POI lines immediately"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"GENERATE {max_stops} POI LINES FOR {city.upper()}\n\n"
-                    f"Format: <name> | <address> | <lat,lon> | day <n>\n\n"
-                    f"Trip: {duration_days} days, {stops_per_day} stops/day\n"
-                    f"Interests: {', '.join(interests)}\n\n"
-                    f"OUTPUT LINES NOW (no explanation):"
-                ),
-            },
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': payload_json},
         ]
 
         raw_response = ''
         retry_raw = ''
         parsed: Dict[str, Any] = {}
+
         try:
-            raw_response = llm_client.generate_response(
+            raw_response = cls._generate_llm_json_response(
+                llm_client,
                 messages=messages,
-                temperature=0.0,
-                max_tokens=450,
+                max_tokens=2000,
             )
             parsed = cls._extract_json_object(raw_response)
         except Exception:
-            logger.exception("AI itinerary planning first pass failed city=%s", city)
+            logger.exception('AI itinerary planning first pass failed city=%s', city)
 
-        suggested_items = cls._extract_suggested_items(parsed, raw_response)
-        sanitized_names = cls._sanitize_suggested_names(
-            [item['name'] for item in suggested_items if item.get('name')],
-            city,
-        )
-        suggested_items = [{'name': name} for name in sanitized_names]
-        suggested_names = sanitized_names
-        selected_pois = cls._match_suggested_names_to_pois(suggested_names, candidate_pool)
+        if not isinstance(parsed, dict) or not isinstance(parsed.get('days'), list):
+            retry_messages = [
+                {
+                    'role': 'system',
+                    'content': (
+                        'Return ONLY valid JSON. No prose. No markdown. No code fences. '
+                        'Use exactly the same schema as before. Output the final JSON object directly.'
+                    ),
+                },
+                {'role': 'user', 'content': payload_json},
+            ]
+            try:
+                retry_raw = cls._generate_llm_json_response(
+                    llm_client,
+                    messages=retry_messages,
+                    max_tokens=2000,
+                )
+                parsed = cls._extract_json_object(retry_raw)
+            except Exception:
+                logger.exception('AI itinerary planning retry failed city=%s', city)
 
-        # Auto-create missing AI suggestions using geocoding (city + place name).
-        matched_names = {cls._normalize_text(poi.name) for poi in selected_pois}
-        for item in suggested_items:
-            if len(selected_pois) >= max_stops:
-                break
-            item_name_key = cls._normalize_text(item.get('name'))
-            if not item_name_key or item_name_key in matched_names:
-                continue
-            created = cls._upsert_ai_suggested_poi(city=city, suggestion=item, interests=interests)
-            if created is not None and created.id not in {poi.id for poi in selected_pois}:
-                selected_pois.append(created)
-                matched_names.add(item_name_key)
-
-        selected_pois = selected_pois[:max_stops]
-
-        # Always prefer cleaner retry output when available, even if first pass returned something.
-        retry_messages = [
-            {
-                "role": "system",
-                "content": (
-                    "⚠️ OUTPUT ONLY POI LINES. NO PREAMBLE. NO THINKING. NO REASONING.\n\n"
-                    "Format: <name> | <address> | <lat,lon> | day <n>\n\n"
-                    "MANDATORY:\n"
-                    "• Start immediately with first POI line\n"
-                    "• One line per POI\n"
-                    "• Real POI names only\n"
-                    "• NO explanations, NO analysis\n"
-                    "• NO JSON, NO markdown, NO bullets\n"
-                    "• Leave empty fields empty (keep pipes)\n\n"
-                    "Example format:\n"
-                    "Galata Tower | Istanbul | 41.0250,28.9820 | day 1"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"OUTPUT {max_stops} POI LINES FOR {city}:\n"
-                    f"<name> | <address> | <lat,lon> | day <n>\n"
-                    f"START NOW (no explanation):"
-                ),
-            },
-        ]
-        try:
-            retry_raw = llm_client.generate_response(
-                messages=retry_messages,
-                temperature=0.0,
-                max_tokens=420,
+        days_data = parsed.get('days') if isinstance(parsed, dict) else None
+        if not isinstance(days_data, list):
+            logger.warning(
+                'AI planning unusable JSON city=%s model_output_preview=%s retry_preview=%s',
+                city,
+                str(raw_response or '')[:220].replace('\n', ' '),
+                str(retry_raw or '')[:220].replace('\n', ' '),
             )
-            retry_names_pref = cls._sanitize_suggested_names(cls._extract_names_from_text(retry_raw), city)
-            if len(retry_names_pref) >= max(3, min(6, max_stops // 2)):
-                preferred = cls._match_suggested_names_to_pois(retry_names_pref, candidate_pool)
-                matched_pref = {cls._normalize_text(poi.name) for poi in preferred}
-                pref_ids = {poi.id for poi in preferred}
-                for name in retry_names_pref:
-                    if len(preferred) >= max_stops:
-                        break
-                    key = cls._normalize_text(name)
-                    if key in matched_pref:
-                        continue
+            return {
+                'reason': 'invalid_ai_output',
+                'raw_response': raw_response,
+                'retry_raw_response': retry_raw,
+                'parsed_response': parsed if isinstance(parsed, dict) else {},
+            }
+
+        selected_pois: List[POI] = []
+        selected_ids = set()
+        day_plans: List[Dict[str, Any]] = []
+
+        def _append_selected(poi: POI):
+            if poi.id in selected_ids or len(selected_pois) >= max_stops:
+                return
+            selected_pois.append(poi)
+            selected_ids.add(poi.id)
+
+        for day_index in range(duration_days):
+            day_item = days_data[day_index] if day_index < len(days_data) and isinstance(days_data[day_index], dict) else {}
+            poi_entries = day_item.get('pois') if isinstance(day_item.get('pois'), list) else []
+            resolved_day_pois: List[POI] = []
+            resolved_day_ids = set()
+
+            for poi_entry in poi_entries[:stops_per_day]:
+                if not isinstance(poi_entry, dict):
+                    continue
+
+                source = cls._normalize_text(poi_entry.get('source') or '')
+                name = str(poi_entry.get('name') or '').strip()
+                matched_poi = None
+
+                if source == 'candidate' and poi_entry.get('candidate_id') is not None:
+                    try:
+                        matched_poi = candidate_map_by_id.get(int(poi_entry.get('candidate_id')))
+                    except (TypeError, ValueError):
+                        matched_poi = None
+
+                if matched_poi is None and name:
+                    matched_poi = candidate_map_by_name.get(cls._normalize_text(name))
+
+                if matched_poi is None and name:
+                    fuzzy_matches = cls._match_suggested_names_to_pois([name], candidate_pool)
+                    matched_poi = fuzzy_matches[0] if fuzzy_matches else None
+
+                if matched_poi is None and name:
                     created = cls._upsert_ai_suggested_poi(
                         city=city,
-                        suggestion={'name': name},
+                        suggestion={
+                            'name': name,
+                            'address': str(poi_entry.get('address') or '').strip(),
+                            'latitude': poi_entry.get('latitude'),
+                            'longitude': poi_entry.get('longitude'),
+                            'reason': str(poi_entry.get('reason') or day_item.get('focus') or '').strip(),
+                            'day': day_item.get('day') or (day_index + 1),
+                        },
                         interests=interests,
                     )
-                    if created is not None and created.id not in pref_ids:
-                        preferred.append(created)
-                        pref_ids.add(created.id)
-                        matched_pref.add(key)
-                preferred = preferred[:max_stops]
-                if preferred:
-                    selected_pois = preferred
-        except Exception:
-            logger.exception("AI retry planning failed city=%s", city)
+                    if created is not None:
+                        matched_poi = created
 
-        if not selected_pois:
-            try:
-                retry_names = cls._sanitize_suggested_names(cls._extract_names_from_text(retry_raw), city)
-                retry_items = [{'name': name} for name in retry_names]
-                retry_names = [item['name'] for item in retry_items]
-                selected_pois = cls._match_suggested_names_to_pois(retry_names, candidate_pool)
-                matched_retry = {cls._normalize_text(poi.name) for poi in selected_pois}
-                for item in retry_items:
-                    if len(selected_pois) >= max_stops:
-                        break
-                    item_key = cls._normalize_text(item.get('name'))
-                    if not item_key or item_key in matched_retry:
-                        continue
-                    created = cls._upsert_ai_suggested_poi(city=city, suggestion=item, interests=interests)
-                    if created is not None and created.id not in {poi.id for poi in selected_pois}:
-                        selected_pois.append(created)
-                        matched_retry.add(item_key)
-                selected_pois = selected_pois[:max_stops]
-            except Exception:
-                logger.exception("AI retry planning failed city=%s", city)
-                return {'reason': 'llm_retry_failed'}
+                if matched_poi is None or matched_poi.id in resolved_day_ids:
+                    continue
 
-            if not selected_pois:
-                # Third pass: extremely constrained format to minimize model meta-output.
-                final_retry_raw = ''
-                try:
-                    final_retry_raw = llm_client.generate_response(
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "OUTPUT ONLY POI LINES:\n"
-                                    "<name> | <address> | <lat,lon> | day <n>\n\n"
-                                    "NO preamble. NO thinking. NO explanation. NO meta-text.\n"
-                                    "Start typing lines immediately."
-                                ),
-                            },
-                            {
-                                "role": "user",
-                                "content": f"Output {max_stops} POI lines for {city} now:",
-                            },
-                        ],
-                        temperature=0.0,
-                        max_tokens=420,
-                    )
-                    final_names = cls._sanitize_suggested_names(cls._extract_names_from_text(final_retry_raw), city)
-                    selected_pois = cls._match_suggested_names_to_pois(final_names, candidate_pool)
-                    selected_pois = selected_pois[:max_stops]
-                except Exception:
-                    logger.exception("AI final retry planning failed city=%s", city)
-                    return {'reason': 'llm_retry_failed'}
+                resolved_day_pois.append(matched_poi)
+                resolved_day_ids.add(matched_poi.id)
+                _append_selected(matched_poi)
 
-            # Prefer cleaner retry output when it yields enough places.
-            if retry_raw:
-                retry_names_pref = cls._sanitize_suggested_names(cls._extract_names_from_text(retry_raw), city)
-                if len(retry_names_pref) >= max(3, min(6, max_stops // 2)):
-                    preferred = cls._match_suggested_names_to_pois(retry_names_pref, candidate_pool)
-                    matched_pref = {cls._normalize_text(poi.name) for poi in preferred}
-                    pref_ids = {poi.id for poi in preferred}
-                    for name in retry_names_pref:
-                        if len(preferred) >= max_stops:
-                            break
-                        key = cls._normalize_text(name)
-                        if key in matched_pref:
-                            continue
-                        created = cls._upsert_ai_suggested_poi(
-                            city=city,
-                            suggestion={'name': name},
-                            interests=interests,
-                        )
-                        if created is not None and created.id not in pref_ids:
-                            preferred.append(created)
-                            pref_ids.add(created.id)
-                            matched_pref.add(key)
-                    preferred = preferred[:max_stops]
-                    if preferred:
-                        selected_pois = preferred
-
-            if not selected_pois:
-                logger.warning(
-                    "AI planning unusable output city=%s model_output_preview=%s retry_preview=%s",
-                    city,
-                    str(raw_response or '')[:220].replace('\n', ' '),
-                    str(retry_raw or '')[:220].replace('\n', ' '),
+            if len(resolved_day_pois) < stops_per_day:
+                location_hint = str(day_item.get('location') or daily_locations[day_index]['location'] or city).strip()
+                filler_ranked = cls._rank_pois(
+                    [poi for poi in ranked_pois if poi.id not in resolved_day_ids],
+                    interests + [location_hint],
                 )
-                return {'reason': 'unusable_ai_output'}
+                for poi in filler_ranked:
+                    if len(resolved_day_pois) >= stops_per_day:
+                        break
+                    if poi.id in resolved_day_ids:
+                        continue
+                    resolved_day_pois.append(poi)
+                    resolved_day_ids.add(poi.id)
+                    _append_selected(poi)
+
+            day_plans.append(
+                {
+                    'day': int(day_item.get('day') or (day_index + 1)),
+                    'location': str(day_item.get('location') or daily_locations[day_index]['location'] or city).strip() or city,
+                    'focus': str(day_item.get('focus') or '').strip(),
+                    'pois': resolved_day_pois[:stops_per_day],
+                }
+            )
+
         if len(selected_pois) < max_stops:
             for poi in ranked_pois:
                 if len(selected_pois) >= max_stops:
                     break
-                if poi in selected_pois:
+                if poi.id in selected_ids:
                     continue
                 selected_pois.append(poi)
+                selected_ids.add(poi.id)
 
         daily_themes = parsed.get('daily_themes') if isinstance(parsed, dict) else []
         if not isinstance(daily_themes, list):
             daily_themes = []
 
         return {
-            'selected_pois': selected_pois,
+            'selected_pois': selected_pois[:max_stops],
             'daily_themes': [str(item).strip() for item in daily_themes if str(item).strip()],
+            'day_plans': day_plans,
             'reason': 'ok',
             'raw_response': raw_response,
             'retry_raw_response': retry_raw,
+            'parsed_response': parsed,
         }
 
     @staticmethod
@@ -1674,6 +1751,7 @@ class TripGenerationService:
         visibility: str,
         transport_mode: str,
         stops_per_day: int,
+        day_locations: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         max_stops = duration_days * stops_per_day
         candidates = self._get_city_candidates(city, min_count=max(8, max_stops))
@@ -1691,14 +1769,16 @@ class TripGenerationService:
             stops_per_day=stops_per_day,
             ranked_pois=ranked_pois,
             max_stops=max_stops,
+            daily_locations=day_locations,
         )
         selected_pois = ai_plan.get('selected_pois') or self._select_diverse_pois(ranked_pois, max_stops, interests)
         planning_source = 'ai' if ai_plan.get('selected_pois') else 'rule_based'
         daily_themes = ai_plan.get('daily_themes') or []
         planning_source_reason = ai_plan.get('reason', 'fallback_rule_based')
+        ai_day_plans = ai_plan.get('day_plans') or []
 
         if not selected_pois:
-            raise ValueError("No POIs matched the selected city/interests.")
+            raise ValueError('No POIs matched the selected city/interests.')
 
         start_dt = datetime.combine(start_date, time(hour=9, minute=0))
         end_dt = datetime.combine(start_date + timedelta(days=duration_days - 1), time(hour=20, minute=0))
@@ -1718,23 +1798,49 @@ class TripGenerationService:
 
         hour_slots = [9, 11, 14, 17, 19, 20, 21, 22]
         day_plan: List[Dict[str, Any]] = []
+        ordered_day_plans = []
 
+        if ai_day_plans:
+            for day in range(duration_days):
+                ai_day_meta = ai_day_plans[day] if day < len(ai_day_plans) and isinstance(ai_day_plans[day], dict) else {}
+                ai_day_pois = ai_day_meta.get('pois') if isinstance(ai_day_meta.get('pois'), list) else []
+                ordered_day_plans.append(
+                    {
+                        'day': day + 1,
+                        'location': str(ai_day_meta.get('location') or '').strip() or None,
+                        'focus': str(ai_day_meta.get('focus') or '').strip() or None,
+                        'pois': ai_day_pois[:stops_per_day],
+                    }
+                )
+        else:
+            for day in range(duration_days):
+                ordered_day_plans.append(
+                    {
+                        'day': day + 1,
+                        'location': None,
+                        'focus': None,
+                        'pois': selected_pois[day * stops_per_day:(day + 1) * stops_per_day],
+                    }
+                )
+
+        global_order_index = 0
         for day in range(duration_days):
             day_date = start_date + timedelta(days=day)
-            day_pois = selected_pois[day * stops_per_day:(day + 1) * stops_per_day]
+            day_meta = ordered_day_plans[day] if day < len(ordered_day_plans) else {'pois': []}
+            day_pois = day_meta.get('pois') if isinstance(day_meta.get('pois'), list) else []
             if not day_pois:
                 break
 
             day_stops = []
-            for day_index, poi in enumerate(day_pois):
-                order_index = (day * stops_per_day) + day_index
+            for day_index, poi in enumerate(day_pois[:stops_per_day]):
                 ItineraryItem.objects.create(
                     itinerary=itinerary,
                     poi=poi,
-                    order_index=order_index,
+                    order_index=global_order_index,
                     arrival_time=time(hour=hour_slots[min(day_index, len(hour_slots) - 1)], minute=0),
-                    notes=f"Day {day + 1}: {poi.name}",
+                    notes=f'Day {day + 1}: {poi.name}',
                 )
+                global_order_index += 1
                 day_stops.append(poi)
 
             day_plan.append(
@@ -1742,6 +1848,8 @@ class TripGenerationService:
                     'day': day + 1,
                     'date': day_date.isoformat(),
                     'theme': daily_themes[day] if day < len(daily_themes) else None,
+                    'focus': day_meta.get('focus'),
+                    'location_hint': day_meta.get('location'),
                     'stops_count': len(day_stops),
                     'stops': day_stops,
                 }
@@ -1757,4 +1865,5 @@ class TripGenerationService:
             'planning_source_reason': planning_source_reason,
             'ai_raw_response': ai_plan.get('raw_response', ''),
             'ai_retry_raw_response': ai_plan.get('retry_raw_response', ''),
+            'ai_parsed_response': ai_plan.get('parsed_response', {}),
         }

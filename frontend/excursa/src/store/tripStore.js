@@ -31,6 +31,13 @@ const useTripStore = create((set, get) => ({
   error: null,
 
   /**
+   * Explicitly control AI generation loading state
+   */
+  setGenerating: (value) => {
+    set({ isGenerating: Boolean(value) });
+  },
+
+  /**
    * Fetch all trips for user
    */
   fetchAllTrips: async () => {
