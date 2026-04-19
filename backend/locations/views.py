@@ -578,6 +578,23 @@ class POIViewSet(viewsets.ModelViewSet):
             pois = GeoService.apply_category_filter(pois, filters['category'])
         if filters.get('min_rating'):
             pois = pois.filter(average_rating__gte=filters['min_rating'])
+
+        interests = []
+        for raw in request.query_params.getlist('interests'):
+            interests.extend([item.strip() for item in str(raw).split(',') if item.strip()])
+        interests_only_raw = str(request.query_params.get('interests_only', '')).strip().lower()
+        interests_only = interests_only_raw in {'1', 'true', 'yes', 'on'}
+        if interests and interests_only and not filters.get('category'):
+            interest_values = GeoService.normalize_interest_values(interests)
+            interest_categories = GeoService._map_interests_to_categories(interest_values)
+            interest_query = Q()
+            if interest_categories:
+                interest_query |= Q(category__in=interest_categories)
+            if interest_values:
+                interest_query |= GeoService.build_interest_tag_query(interest_values)
+            if interest_query:
+                pois = pois.filter(interest_query)
+
         serializer = POIListSerializer(pois, many=True)
         
         return Response({

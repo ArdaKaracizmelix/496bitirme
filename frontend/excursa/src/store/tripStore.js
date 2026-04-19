@@ -183,7 +183,7 @@ const useTripStore = create((set, get) => ({
         error?.message ||
         'Failed to generate trip';
       set({ error: message, isGenerating: false });
-      console.error('Failed to generate trip from preferences:', error);
+      console.warn('Failed to generate trip from preferences:', message);
       throw new Error(message);
     }
   },

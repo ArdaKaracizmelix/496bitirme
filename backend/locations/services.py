@@ -452,20 +452,32 @@ class ExternalSyncService:
         # Fetch from Google Places API
         google_places = self._fetch_google_places(lat, lon, radius_m=radius_m)
         for place_data in google_places:
-            dto = self._parse_google_place(place_data)
-            dto.metadata['city'] = city or dto.metadata.get('city')
-            poi = self.upsert_poi(dto)
-            if poi:
-                new_count += 1
+            try:
+                dto = self._parse_google_place(place_data)
+                if not dto:
+                    continue
+                dto.metadata['city'] = city or dto.metadata.get('city')
+                poi = self.upsert_poi(dto)
+                if poi:
+                    new_count += 1
+            except Exception:
+                print(f"Skipping malformed Google place: {place_data.get('place_id') or place_data.get('name')}")
+                continue
         
         # Fetch from Foursquare API
         fsq_places = self._fetch_foursquare_places(lat, lon, radius_m=radius_m)
         for place_data in fsq_places:
-            dto = self._parse_fsq_place(place_data)
-            dto.metadata['city'] = city or dto.metadata.get('city')
-            poi = self.upsert_poi(dto)
-            if poi:
-                new_count += 1
+            try:
+                dto = self._parse_fsq_place(place_data)
+                if not dto:
+                    continue
+                dto.metadata['city'] = city or dto.metadata.get('city')
+                poi = self.upsert_poi(dto)
+                if poi:
+                    new_count += 1
+            except Exception:
+                print(f"Skipping malformed Foursquare place: {place_data.get('fsq_id') or place_data.get('name')}")
+                continue
 
         # Fallback: enrich from OSM when provider APIs are unavailable or sparse.
         if new_count < TRAVEL_SYNC_MIN_EXPECTED_RESULTS:
@@ -840,16 +852,22 @@ out center 120;
             print(f"Error fetching from OSM Overpass: {str(e)}")
             return []
     
-    def _parse_google_place(self, place_data: Dict) -> 'ExternalPlaceDTO':
+    def _parse_google_place(self, place_data: Dict) -> Optional['ExternalPlaceDTO']:
         """Parse Google Places API response"""
         place_types = place_data.get('types', [])
         photos = place_data.get('photos') or []
+        geometry = place_data.get('geometry') or {}
+        location = geometry.get('location') or {}
+        lat = location.get('lat')
+        lon = location.get('lng')
+        if lat is None or lon is None or not place_data.get('name'):
+            return None
         return ExternalPlaceDTO(
             external_id=place_data.get('place_id'),
             name=place_data.get('name'),
             address=place_data.get('vicinity'),
-            lat=place_data['geometry']['location']['lat'],
-            lon=place_data['geometry']['location']['lng'],
+            lat=lat,
+            lon=lon,
             category=(place_types[0] if place_types else 'other'),
             metadata={
                 'source': 'google_places',
@@ -860,7 +878,7 @@ out center 120;
             tags=self._normalize_tags(place_types),
         )
     
-    def _parse_fsq_place(self, place_data: Dict) -> 'ExternalPlaceDTO':
+    def _parse_fsq_place(self, place_data: Dict) -> Optional['ExternalPlaceDTO']:
         """Parse Foursquare API response"""
         location = place_data.get('location', {})
         geocodes = place_data.get('geocodes') or {}
@@ -868,6 +886,8 @@ out center 120;
         categories = place_data.get('categories', [])
         primary_category = categories[0].get('name', 'other') if categories else 'other'
         category_tags = [c.get('name') for c in categories]
+        if not place_data.get('name') or main_geocode.get('latitude') is None or main_geocode.get('longitude') is None:
+            return None
         return ExternalPlaceDTO(
             external_id=place_data.get('fsq_id'),
             name=place_data.get('name'),

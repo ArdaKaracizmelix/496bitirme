@@ -156,6 +156,7 @@ class ItineraryGenerateRequestSerializer(serializers.Serializer):
         default=Itinerary.TransportMode.DRIVING,
     )
     stops_per_day = serializers.IntegerField(min_value=1, max_value=8, required=False, default=4)
+    min_rating = serializers.FloatField(min_value=0, max_value=5, required=False)
 
     def validate_city(self, value):
         city = str(value or '').strip()

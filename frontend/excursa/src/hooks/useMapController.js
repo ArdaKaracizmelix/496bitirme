@@ -226,7 +226,7 @@ export const useMapController = () => {
           longitudeDelta: region.longitudeDelta,
         };
       } catch (err) {
-        console.error('Error fetching nearby places:', err);
+        console.warn('Error fetching nearby places:', err?.response?.data?.error || err?.message || err);
         const status = err?.response?.status;
         const detail = err?.response?.data?.detail || err?.response?.data?.error;
         setError(
@@ -321,7 +321,7 @@ export const useMapController = () => {
       }
       setDisplayedMarkers(dedupePOIs(response.results || []).map((poi) => ({ ...poi, type: 'marker' })));
     } catch (err) {
-      console.error('Error searching:', err);
+      console.warn('Error searching:', err?.response?.data?.error || err?.message || err);
       setError('Search failed');
     } finally {
       setIsFetching(false);
@@ -336,6 +336,7 @@ export const useMapController = () => {
     (filters) => {
       const nextFilters = { ...activeFilters, ...filters };
       setActiveFilters(nextFilters);
+      dataModeRef.current = 'nearby';
       poiCacheRef.current.clear();
       // Re-fetch with new filters
       fetchNearbyPlaces(currentRegion, null, nextFilters, { force: true });

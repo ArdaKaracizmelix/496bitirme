@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import hashlib
 
 from django.db.models import Q
 
@@ -29,6 +30,8 @@ class TravelContext:
     themes: List[str] = field(default_factory=list)
     intent: str = "place_recommendation"
     user_interests: List[str] = field(default_factory=list)
+    min_rating: Optional[float] = None
+    sort_by_rating: bool = False
     candidates: List[TravelCandidate] = field(default_factory=list)
     foods: List[str] = field(default_factory=list)
     routes: List[Dict[str, Any]] = field(default_factory=list)
@@ -56,6 +59,8 @@ class TravelRecommendationService:
         entities = intent_result.entities or {}
         city = entities.get("city", "")
         days = int(entities.get("days") or 0)
+        min_rating = self._coerce_rating(entities.get("min_rating"))
+        sort_by_rating = bool(entities.get("sort_by_rating"))
         themes = list(dict.fromkeys((entities.get("themes") or []) + self.INTENT_THEME_MAP.get(intent_result.intent, [])))
         user_interests = self._load_user_interests(user_id)
         effective_themes = list(dict.fromkeys(themes + user_interests))
@@ -70,10 +75,26 @@ class TravelRecommendationService:
             themes=themes,
             intent=intent_result.intent,
             user_interests=user_interests,
-            candidates=self._dedupe_and_rank(candidates, effective_themes),
+            min_rating=min_rating,
+            sort_by_rating=sort_by_rating,
+            candidates=self._dedupe_and_rank(
+                candidates,
+                effective_themes,
+                min_rating=min_rating,
+                sort_by_rating=sort_by_rating,
+                rotation_key=f"{user_id or ''}|{message or ''}",
+            ),
             foods=list(city_guide.get("foods") or []),
             routes=self._load_routes(city, user_id),
         )
+
+    def _coerce_rating(self, value) -> Optional[float]:
+        try:
+            if value is None or value == "":
+                return None
+            return max(0.0, min(float(value), 5.0))
+        except (TypeError, ValueError):
+            return None
 
     def _load_user_interests(self, user_id: Optional[str]) -> List[str]:
         if not user_id:
@@ -140,7 +161,16 @@ class TravelRecommendationService:
         try:
             queryset = POI.objects.all()
             if city:
-                queryset = queryset.filter(Q(address__icontains=city) | Q(name__icontains=city))
+                city_tag = city.lower().replace(" ", "_")
+                queryset = queryset.filter(
+                    Q(address__icontains=city)
+                    | Q(name__icontains=city)
+                    | Q(metadata__city__icontains=city)
+                    | Q(metadata__locality__icontains=city)
+                    | Q(metadata__district__icontains=city)
+                    | Q(tags__contains=[city.lower()])
+                    | Q(tags__contains=[city_tag])
+                )
 
             filters = Q()
             for theme in themes[:5]:
@@ -152,8 +182,9 @@ class TravelRecommendationService:
                 queryset = queryset.filter(filters)
 
             results = []
-            for poi in queryset.distinct()[:60]:
+            for poi in queryset.distinct().order_by("-average_rating")[:180]:
                 tags = [str(tag).lower() for tag in (poi.tags or [])]
+                metadata = poi.metadata if isinstance(poi.metadata, dict) else {}
                 results.append(
                     TravelCandidate(
                         name=poi.name,
@@ -165,9 +196,16 @@ class TravelRecommendationService:
                         rating=poi.average_rating,
                         source="internal_poi",
                         score=0.82 + self._score_text(
-                            " ".join([poi.name, poi.address, poi.category, " ".join(tags)]),
+                            " ".join([
+                                poi.name,
+                                poi.address,
+                                poi.category,
+                                " ".join(tags),
+                                str(metadata.get("derived_category") or ""),
+                                str(metadata.get("primary_category") or ""),
+                            ]),
                             themes,
-                        ) + min(float(poi.average_rating or 0) / 5.0, 1.0) * 0.2,
+                        ) + min(float(poi.average_rating or 0) / 5.0, 1.0) * 0.35,
                     )
                 )
             return results
@@ -200,13 +238,27 @@ class TravelRecommendationService:
         except Exception:
             return []
 
-    def _dedupe_and_rank(self, candidates: List[TravelCandidate], themes: List[str]) -> List[TravelCandidate]:
+    def _dedupe_and_rank(
+        self,
+        candidates: List[TravelCandidate],
+        themes: List[str],
+        *,
+        min_rating: Optional[float] = None,
+        sort_by_rating: bool = False,
+        rotation_key: str = "",
+    ) -> List[TravelCandidate]:
         by_name: Dict[str, TravelCandidate] = {}
         for candidate in candidates:
             key = candidate.name.lower().strip()
             if not key:
                 continue
+            if min_rating is not None:
+                if candidate.rating is None or float(candidate.rating or 0.0) < min_rating:
+                    continue
             candidate.score += self._theme_bonus(candidate, themes)
+            candidate.score += self._stable_jitter(candidate.name, rotation_key)
+            if sort_by_rating and candidate.rating is not None:
+                candidate.score += min(float(candidate.rating), 5.0) * 0.18
             existing = by_name.get(key)
             if existing:
                 if candidate.cultural_note and not existing.cultural_note:
@@ -215,7 +267,52 @@ class TravelRecommendationService:
                     existing.cultural_note = candidate.note
             if not existing or candidate.score > existing.score:
                 by_name[key] = candidate
-        return sorted(by_name.values(), key=lambda item: item.score, reverse=True)
+        ranked = sorted(
+            by_name.values(),
+            key=lambda item: (
+                item.score,
+                float(item.rating or 0.0) if sort_by_rating else 0.0,
+            ),
+            reverse=True,
+        )
+        return self._diversify(ranked)
+
+    def _stable_jitter(self, name: str, rotation_key: str) -> float:
+        if not rotation_key:
+            return 0.0
+        digest = hashlib.sha1(f"{rotation_key}|{name}".encode("utf-8")).hexdigest()
+        return (int(digest[:4], 16) % 100) / 1000.0
+
+    def _diversify(self, ranked: List[TravelCandidate]) -> List[TravelCandidate]:
+        """Keep relevance first, but avoid every answer starting with the same category block."""
+        if len(ranked) <= 4:
+            return ranked
+        buckets: Dict[str, List[TravelCandidate]] = {}
+        for candidate in ranked:
+            buckets.setdefault(str(candidate.category or "place").lower(), []).append(candidate)
+
+        diversified: List[TravelCandidate] = []
+        seen = set()
+        category_order = sorted(
+            buckets.keys(),
+            key=lambda category: ranked.index(buckets[category][0]),
+        )
+
+        while len(diversified) < len(ranked):
+            picked = 0
+            for category in category_order:
+                bucket = buckets.get(category) or []
+                while bucket and bucket[0].name.lower() in seen:
+                    bucket.pop(0)
+                if not bucket:
+                    continue
+                candidate = bucket.pop(0)
+                diversified.append(candidate)
+                seen.add(candidate.name.lower())
+                picked += 1
+            if picked == 0:
+                break
+        return diversified
 
     def _matches_theme(self, category: str, note: str, themes: List[str]) -> bool:
         if not themes:

@@ -130,6 +130,10 @@ class NLPIntentParser:
             entities["themes"] = themes
             entities["interests"] = themes
 
+        rating_filter = self._extract_rating_filter(normalized_message)
+        if rating_filter:
+            entities.update(rating_filter)
+
         if "city" not in entities:
             destination = self._extract_destination_candidate(normalized_message, original_message)
             if destination:
@@ -137,6 +141,44 @@ class NLPIntentParser:
                 entities["city"] = destination
 
         return entities
+
+    def _extract_rating_filter(self, normalized_message: str) -> dict:
+        """
+        Extract constraints like "4.5 ustu", "puanı 4 üzeri" or
+        "yüksek puanlı". Ratings are kept within the POI 0-5 scale.
+        """
+        text = normalized_message.replace(",", ".")
+        explicit = re.search(
+            r"(?:puan(?:i|ı)?|rating|skor)?\s*(\d(?:\.\d)?)\s*"
+            r"(?:ustu|uzeri|ve\s*ustu|ve\s*uzeri|\+|higher|above)",
+            text,
+        )
+        if explicit:
+            try:
+                value = float(explicit.group(1))
+                return {
+                    "min_rating": max(0.0, min(value, 5.0)),
+                    "sort_by_rating": True,
+                }
+            except (TypeError, ValueError):
+                return {}
+
+        high_rating_terms = [
+            "yuksek puanli",
+            "yüksek puanlı",
+            "en iyi puanli",
+            "en iyi puanlı",
+            "top rated",
+            "best rated",
+            "ratingi yuksek",
+            "ratingi yüksek",
+        ]
+        if any(term in text for term in high_rating_terms):
+            return {
+                "min_rating": 4.0,
+                "sort_by_rating": True,
+            }
+        return {}
 
     def _extract_city(self, normalized_message: str) -> str:
         for city, aliases in self.city_aliases.items():
