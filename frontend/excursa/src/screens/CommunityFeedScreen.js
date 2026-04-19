@@ -25,8 +25,6 @@ import { buildPostLink, copyTextToClipboard } from '../utils/linkUtils';
 
 const QUICK_ITEMS = [
   { id: 'feed', title: 'Akis', subtitle: 'Sosyal feed' },
-  { id: 'route', title: 'Rota', subtitle: 'Gezi plani' },
-  { id: 'explore', title: 'Harita', subtitle: 'Kesfet' },
   { id: 'saved', title: 'Kayitlar', subtitle: 'Favoriler' },
 ];
 
@@ -277,17 +275,6 @@ export default function CommunityFeedScreen() {
   const handleQuickAction = useCallback((itemId) => {
     if (itemId === 'feed') {
       setActiveList('feed');
-      return;
-    }
-    if (itemId === 'route') {
-      navigation.navigate('Trips', {
-        screen: 'IterinaryBuilder',
-        params: { tripId: null, mode: 'create' },
-      });
-      return;
-    }
-    if (itemId === 'explore') {
-      navigation.navigate('Home');
       return;
     }
     if (itemId === 'saved') {

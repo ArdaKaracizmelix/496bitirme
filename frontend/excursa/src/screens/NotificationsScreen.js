@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -13,14 +12,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import AppAvatar from '../components/AppAvatar';
 import {
   useMarkNotificationRead,
   useNotifications,
   useUnreadNotifications,
 } from '../hooks/useNotifications';
 import { formatTimeAgo } from '../components/SocialPostCard';
-
-const FALLBACK_AVATAR = 'https://i.pravatar.cc/150?img=20';
 
 const FILTERS = [
   { key: 'ALL', label: 'All' },
@@ -219,7 +217,7 @@ function NotificationItem({ notification, onPress }) {
   const category = notification?.category || 'ACTIVITY';
   const meta = CATEGORY_META[category] || CATEGORY_META.ACTIVITY;
   const unread = !notification?.is_read;
-  const avatar = notification?.actor_avatar_url || FALLBACK_AVATAR;
+  const avatar = notification?.actor_avatar_url || null;
   const actorName = notification?.actor_name;
 
   return (
@@ -230,7 +228,7 @@ function NotificationItem({ notification, onPress }) {
     >
       <View style={styles.avatarWrap}>
         {actorName ? (
-          <Image source={{ uri: avatar }} style={styles.avatar} />
+          <AppAvatar uri={avatar} style={styles.avatar} />
         ) : (
           <View style={[styles.systemAvatar, { backgroundColor: meta.bg }]}>
             <Text style={[styles.systemAvatarText, { color: meta.color }]}>{meta.symbol}</Text>

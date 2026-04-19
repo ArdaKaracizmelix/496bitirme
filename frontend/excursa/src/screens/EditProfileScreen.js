@@ -10,18 +10,16 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  Image,
   useWindowDimensions,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import AppAvatar from '../components/AppAvatar';
 import useAuthStore from '../store/authStore';
 import AuthManager from '../services/AuthManager';
 import api from '../services/api';
-
-const FALLBACK_AVATAR = 'https://i.pravatar.cc/150?img=1';
 
 export default function EditProfileScreen() {
   const navigation = useNavigation();
@@ -45,7 +43,6 @@ export default function EditProfileScreen() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const avatarPreview = avatarUrl || FALLBACK_AVATAR;
   const profileName = fullName.trim() || 'Gezgin profili';
   const profileHandle = username.trim() ? `@${username.trim()}` : '@kullanici_adi';
 
@@ -270,7 +267,7 @@ export default function EditProfileScreen() {
 
           <View style={styles.previewCard}>
             <View style={styles.avatarWrap}>
-              <Image source={{ uri: avatarPreview }} style={styles.avatarPreview} />
+              <AppAvatar uri={avatarUrl} style={styles.avatarPreview} />
               <TouchableOpacity
                 style={styles.avatarAction}
                 onPress={handlePickAvatar}
@@ -328,7 +325,7 @@ export default function EditProfileScreen() {
           <View style={styles.formCard}>
             <SectionHeader
               title="Profil Fotografi"
-              subtitle="Galeriden sec veya herkese acik bir gorsel baglantisi kullan."
+              subtitle="Galeriden secerek profil fotografini guncelle."
             />
             <TouchableOpacity
               style={styles.secondaryAction}
@@ -337,19 +334,6 @@ export default function EditProfileScreen() {
             >
               <Text style={styles.secondaryActionText}>Galeriden Sec</Text>
             </TouchableOpacity>
-            <Field
-              label="Avatar URL"
-              value={avatarUrl}
-              onChangeText={(value) => {
-                setAvatarUrl(value);
-                if (!isLocalAvatarUri(value)) {
-                  setSelectedAvatarAsset(null);
-                }
-              }}
-              editable={!isSaving}
-              placeholder="https://..."
-              autoCapitalize="none"
-            />
           </View>
 
           <View style={styles.formCard}>

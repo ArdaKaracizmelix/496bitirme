@@ -263,6 +263,26 @@ export const locationService = {
   },
 
   /**
+   * Update an existing review
+   * @param {string} reviewId - UUID of the review
+   * @param {number} rating - Rating 1-5
+   * @param {string} comment - Review text
+   * @returns {Promise<Object>} - Updated review object
+   */
+  updateReview: async (reviewId, rating, comment) => {
+    try {
+      const response = await api.patch(`/recommendations/reviews/${reviewId}/`, {
+        rating,
+        comment,
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error updating review:', error);
+      throw error;
+    }
+  },
+
+  /**
    * Record a user interaction with a POI
    * @param {string} poiId - UUID of the POI
    * @param {string} interactionType - Type: VIEW, LIKE, SHARE, VISIT, CLICK, CHECK_IN

@@ -22,6 +22,7 @@ import { useCreatePost } from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
 import SocialService from '../services/SocialService';
 import TripService from '../services/TripService';
+import AppAvatar from '../components/AppAvatar';
 import RouteShareCard from '../components/RouteShareCard';
 import { buildRouteShareData } from '../utils/routeShareUtils';
 
@@ -81,11 +82,11 @@ function Header({ canSubmit, submitting, onBack, onSubmit }) {
 function Author({ user, visibility, onPress }) {
   const active = VISIBILITY.find((item) => item.value === visibility);
   const name = user?.full_name || user?.username || user?.email || 'Gezgin';
-  const avatar = user?.avatar_url || 'https://i.pravatar.cc/150?img=12';
+  const avatar = user?.avatar_url || null;
 
   return (
     <View style={styles.author}>
-      <Image source={{ uri: avatar }} style={styles.avatar} />
+      <AppAvatar uri={avatar} style={styles.avatar} />
       <View style={styles.authorCopy}>
         <Text style={styles.authorName} numberOfLines={1}>{name}</Text>
         <TouchableOpacity style={styles.visibilityMini} onPress={onPress}>

@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import AppAvatar from '../components/AppAvatar';
 import {
   formatRouteDuration,
   getPostPresentation,
@@ -26,8 +27,6 @@ import {
   useUserProfile,
 } from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
-
-const FALLBACK_AVATAR = 'https://i.pravatar.cc/150?img=1';
 const TAB_ITEMS = [
   { id: 'journey', label: 'Gunluk', hint: 'Tum izler' },
   { id: 'routes', label: 'Rotalar', hint: 'Planlar' },
@@ -153,7 +152,7 @@ export default function ProfileScreen({ route }) {
         profileData?.avatar_url ||
         routeParams.avatar_url ||
         currentUser?.avatar_url ||
-        FALLBACK_AVATAR,
+        null,
       bio: profileData?.bio ?? routeParams.bio ?? currentUser?.bio ?? '',
       followers_count:
         profileData?.followers_count ??
@@ -274,8 +273,8 @@ export default function ProfileScreen({ route }) {
       <View style={[styles.heroCard, insets.top > 0 && styles.heroInset]}>
         <View style={styles.heroTopRow}>
           <View style={styles.identityRow}>
-            <Image
-              source={{ uri: userProfile.avatar_url }}
+            <AppAvatar
+              uri={userProfile.avatar_url}
               style={[styles.profileAvatar, isCompact && styles.profileAvatarCompact]}
             />
             <View style={styles.identityText}>
