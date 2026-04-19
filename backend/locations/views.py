@@ -20,11 +20,12 @@ from django.shortcuts import get_object_or_404
 from .models import POI
 from .serializers import POISerializer, POIListSerializer, ClusterSerializer
 from .services import GeoService, ExternalSyncService
+from .supported_cities import get_supported_city, search_supported_cities
 
 logger = logging.getLogger(__name__)
 
 # Auto external-sync tuning for map exploration
-AUTO_SYNC_MIN_RESULTS = 8
+AUTO_SYNC_MIN_RESULTS = 20
 AUTO_SYNC_GEOHASH_PRECISION = 5
 AUTO_SYNC_COOLDOWN_SECONDS = 30 * 60  # 30 minutes per geohash cell
 _AUTO_SYNC_FALLBACK_COOLDOWN = {}
@@ -117,20 +118,20 @@ def _seed_demo_pois_if_empty():
         )
 
 
-def _run_external_sync(lat: float, lon: float):
+def _run_external_sync(lat: float, lon: float, radius_m: int = 10000):
     """Run external sync in a background thread to keep nearby responses fast."""
     try:
         sync_service = ExternalSyncService(
             google_api_key=getattr(settings, 'GOOGLE_PLACES_API_KEY', None),
             fsq_api_key=getattr(settings, 'FOURSQUARE_API_KEY', None),
         )
-        created = sync_service.fetch_and_sync(lat, lon)
-        logger.info("auto-sync completed lat=%s lon=%s created=%s", lat, lon, created)
+        created = sync_service.fetch_and_sync(lat, lon, radius_m=radius_m)
+        logger.info("auto-sync completed lat=%s lon=%s radius=%s created=%s", lat, lon, radius_m, created)
     except Exception:
         logger.exception("auto-sync failed lat=%s lon=%s", lat, lon)
 
 
-def _maybe_trigger_external_sync(lat: float, lon: float, local_result_count: int):
+def _maybe_trigger_external_sync(lat: float, lon: float, local_result_count: int, radius_m: int = 10000):
     """
     Trigger throttled external sync when local nearby results are low.
     Uses geohash+cooldown to avoid repeated external API calls.
@@ -155,7 +156,7 @@ def _maybe_trigger_external_sync(lat: float, lon: float, local_result_count: int
             _AUTO_SYNC_FALLBACK_COOLDOWN[cache_key] = now + AUTO_SYNC_COOLDOWN_SECONDS
         logger.warning("auto-sync cache unavailable, using process-local cooldown")
 
-    threading.Thread(target=_run_external_sync, args=(lat, lon), daemon=True).start()
+    threading.Thread(target=_run_external_sync, args=(lat, lon, radius_m), daemon=True).start()
 
 
 class POIViewSet(viewsets.ModelViewSet):
@@ -185,8 +186,10 @@ class POIViewSet(viewsets.ModelViewSet):
         """
         _seed_demo_pois_if_empty()
         query = str(request.query_params.get('q') or '').strip()
+        supported_matches = search_supported_cities(query)
         if len(query) < 2:
-            return Response({'count': 0, 'results': []})
+            cities = [city['name'] for city in supported_matches]
+            return Response({'count': len(cities), 'results': cities})
 
         def _normalize(text: str) -> str:
             lowered = str(text or '').strip().lower()
@@ -261,10 +264,12 @@ class POIViewSet(viewsets.ModelViewSet):
             return _dedupe_keep_order([name for name, _ in ranked])[:10]
 
         global_results = _fetch_global_city_suggestions(query)
-        if global_results:
+        if global_results or supported_matches:
+            supported_names = [city['name'] for city in supported_matches]
+            merged = _dedupe_keep_order(supported_names + global_results)
             return Response({
-                'count': len(global_results),
-                'results': global_results,
+                'count': len(merged),
+                'results': merged,
             })
 
         queryset = POI.objects.all().only('address', 'metadata')
@@ -364,34 +369,42 @@ class POIViewSet(viewsets.ModelViewSet):
             radius = 20000
         radius = max(2000, min(radius, 50000))
 
-        # Resolve city center coordinates from dynamic geocoding.
-        try:
-            geocode_response = requests.get(
-                'https://geocoding-api.open-meteo.com/v1/search',
-                params={
-                    'name': city,
-                    'count': 1,
-                    'language': 'en',
-                    'format': 'json',
-                },
-                timeout=6,
-            )
-            geocode_response.raise_for_status()
-            geocode_results = geocode_response.json().get('results') or []
-            if not geocode_results:
+        supported_city = get_supported_city(city)
+        if supported_city:
+            city = supported_city['name']
+            lat = float(supported_city['latitude'])
+            lon = float(supported_city['longitude'])
+            radius = max(radius, int(supported_city.get('radius') or radius))
+            radius = max(2000, min(radius, 50000))
+        else:
+            # Resolve city center coordinates from dynamic geocoding.
+            try:
+                geocode_response = requests.get(
+                    'https://geocoding-api.open-meteo.com/v1/search',
+                    params={
+                        'name': city,
+                        'count': 1,
+                        'language': 'en',
+                        'format': 'json',
+                    },
+                    timeout=6,
+                )
+                geocode_response.raise_for_status()
+                geocode_results = geocode_response.json().get('results') or []
+                if not geocode_results:
+                    return Response(
+                        {'error': f"City '{city}' could not be resolved to coordinates"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                center_result = geocode_results[0]
+                lat = float(center_result['latitude'])
+                lon = float(center_result['longitude'])
+            except Exception:
+                logger.exception("City geocoding failed city=%s", city)
                 return Response(
-                    {'error': f"City '{city}' could not be resolved to coordinates"},
+                    {'error': f"Failed to resolve city '{city}'"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            center_result = geocode_results[0]
-            lat = float(center_result['latitude'])
-            lon = float(center_result['longitude'])
-        except Exception:
-            logger.exception("City geocoding failed city=%s", city)
-            return Response(
-                {'error': f"Failed to resolve city '{city}'"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
 
         # Resolve interests from payload first, then user profile vector keys as fallback.
         raw_interests = request.data.get('interests') or []
@@ -414,7 +427,7 @@ class POIViewSet(viewsets.ModelViewSet):
             fsq_api_key=getattr(settings, 'FOURSQUARE_API_KEY', None),
         )
         try:
-            created_count = sync_service.fetch_and_sync(lat, lon)
+            created_count = sync_service.fetch_and_sync(lat, lon, radius_m=radius, city=city)
         except Exception:
             logger.exception("External sync failed city=%s lat=%s lon=%s", city, lat, lon)
             created_count = 0
@@ -500,7 +513,7 @@ class POIViewSet(viewsets.ModelViewSet):
                     google_api_key=getattr(settings, 'GOOGLE_PLACES_API_KEY', None),
                     fsq_api_key=getattr(settings, 'FOURSQUARE_API_KEY', None),
                 )
-                created_now = sync_service.fetch_and_sync(lat, lon)
+                created_now = sync_service.fetch_and_sync(lat, lon, radius_m=max(radius, 10000))
                 if created_now > 0:
                     pois = GeoService.find_nearby(center, radius, filters)
                     if filters.get('interests_only') and pois.count() == 0:
@@ -509,7 +522,8 @@ class POIViewSet(viewsets.ModelViewSet):
             except Exception:
                 logger.exception("on-demand sync failed lat=%s lon=%s", lat, lon)
 
-        _maybe_trigger_external_sync(lat, lon, pois.count())
+        if bool(getattr(request.user, 'is_authenticated', False)):
+            _maybe_trigger_external_sync(lat, lon, pois.count(), radius_m=max(radius, 10000))
         
         serializer = POIListSerializer(pois, many=True)
         return Response({
@@ -549,6 +563,21 @@ class POIViewSet(viewsets.ModelViewSet):
         ])
         
         pois = GeoService.find_in_viewport(bbox)
+        filters = {}
+        if request.query_params.get('category'):
+            filters['category'] = request.query_params.get('category')
+        if request.query_params.get('min_rating'):
+            try:
+                filters['min_rating'] = float(request.query_params.get('min_rating'))
+            except (TypeError, ValueError):
+                return Response(
+                    {'error': 'Invalid min_rating parameter'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        if filters.get('category'):
+            pois = GeoService.apply_category_filter(pois, filters['category'])
+        if filters.get('min_rating'):
+            pois = pois.filter(average_rating__gte=filters['min_rating'])
         serializer = POIListSerializer(pois, many=True)
         
         return Response({
@@ -671,7 +700,12 @@ class POIViewSet(viewsets.ModelViewSet):
         )
         
         try:
-            new_count = sync_service.fetch_and_sync(lat, lon)
+            try:
+                radius = int(request.data.get('radius', 20000))
+            except (TypeError, ValueError):
+                radius = 20000
+            radius = max(2000, min(radius, 50000))
+            new_count = sync_service.fetch_and_sync(lat, lon, radius_m=radius)
             return Response({
                 'status': 'success',
                 'new_pois_added': new_count,

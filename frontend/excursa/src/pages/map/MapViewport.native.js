@@ -14,39 +14,43 @@ export default function MapViewport({
   navigation,
   getCategoryColor,
   getCategoryName,
+  getCategoryIcon,
   styles,
 }) {
   const renderMarker = (item) => {
     if (item.type === 'cluster') {
       return (
         <Marker
-          key={`cluster-${item.latitude}-${item.longitude}`}
+          key={item.id || `cluster-${item.latitude}-${item.longitude}`}
           coordinate={{
             latitude: item.latitude,
             longitude: item.longitude,
           }}
           onPress={() => {
-            if (mapRef.current) {
+            if (mapRef.current && Array.isArray(item.members)) {
               mapRef.current.fitToCoordinates(
                 item.members.map((member) => ({
                   latitude: member.latitude,
                   longitude: member.longitude,
                 })),
-                { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 } }
+                { edgePadding: { top: 60, right: 60, bottom: 120, left: 60 }, animated: true }
               );
             }
           }}
         >
-          <View style={[styles.clusterMarker, { backgroundColor: '#2980b9' }]}>
+          <View style={[styles.clusterMarker, { backgroundColor: '#111827' }]}>
             <Text style={styles.clusterText}>{item.count}</Text>
           </View>
         </Marker>
       );
     }
 
+    const category = item.display_category || item.category;
+    const isSelected = selectedPOI?.id === item.id;
+
     return (
       <Marker
-        key={item.id}
+        key={`poi-${item.id || `${item.latitude}-${item.longitude}`}`}
         coordinate={{
           latitude: item.latitude,
           longitude: item.longitude,
@@ -57,26 +61,27 @@ export default function MapViewport({
           style={[
             styles.markerContainer,
             {
-              backgroundColor: selectedPOI?.id === item.id ? '#fff' : getCategoryColor(item.category),
+              backgroundColor: isSelected ? '#ffffff' : getCategoryColor(category),
+              transform: [{ scale: isSelected ? 1.12 : 1 }],
             },
           ]}
         >
           <View
             style={[
               styles.markerInner,
-              { backgroundColor: getCategoryColor(item.category) },
+              { backgroundColor: getCategoryColor(category) },
             ]}
           >
-            <Text style={styles.markerEmoji}>ğŸ“</Text>
+            <Text style={styles.markerEmoji}>{getCategoryIcon(category)}</Text>
           </View>
         </View>
 
-        {selectedPOI?.id === item.id && (
+        {isSelected && (
           <Callout onPress={() => navigation.navigate('POIDetail', { poiId: item.id })}>
             <View style={styles.callout}>
               <Text style={styles.calloutTitle}>{item.name}</Text>
-              <Text style={styles.calloutCategory}>{getCategoryName(item.category)}</Text>
-              <Text style={styles.calloutRating}>â­ {item.average_rating?.toFixed(1)}</Text>
+              <Text style={styles.calloutCategory}>{getCategoryName(category)}</Text>
+              <Text style={styles.calloutRating}>Rating {Number(item.average_rating || 0).toFixed(1)}</Text>
             </View>
           </Callout>
         )}

@@ -13,14 +13,20 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapViewport from './MapViewport';
 import { useMapController } from '../../hooks/useMapController';
-import { getCategoryColor, getCategoryName, formatDistance, calculateDistance } from '../../utils/mapUtils';
+import {
+  calculateDistance,
+  formatDistance,
+  getCategoryColor,
+  getCategoryIcon,
+  getCategoryName,
+} from '../../utils/mapUtils';
 
 const CATEGORIES = [
   { id: 'HISTORICAL', label: 'Tarihi' },
+  { id: 'CULTURE', label: 'Kultur' },
+  { id: 'VIEWPOINT', label: 'Manzara' },
   { id: 'NATURE', label: 'Doga' },
-  { id: 'FOOD', label: 'Yemek' },
   { id: 'ENTERTAINMENT', label: 'Eglence' },
-  { id: 'SHOPPING', label: 'Alisveris' },
 ];
 
 const escapeHtml = (value = '') =>
@@ -40,7 +46,9 @@ const buildWebMapHtml = (markers, region) => {
     latitude: item.latitude,
     longitude: item.longitude,
     count: item.count || 1,
-    category: item.category || '',
+    category: item.display_category || item.category || '',
+    color: getCategoryColor(item.display_category || item.category),
+    icon: getCategoryIcon(item.display_category || item.category),
     average_rating: item.average_rating || 0,
   }));
 
@@ -73,6 +81,17 @@ const buildWebMapHtml = (markers, region) => {
       justify-content: center;
       border: 2px solid #fff;
       box-sizing: border-box;
+      box-shadow: 0 10px 24px rgba(17, 24, 39, .24);
+    }
+    .poi-marker {
+      width: 34px;
+      height: 34px;
+      border-radius: 18px;
+      color: white;
+      font: 800 13px/34px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-align: center;
+      border: 3px solid white;
+      box-shadow: 0 8px 20px rgba(17, 24, 39, .22);
     }
   </style>
 </head>
@@ -98,7 +117,13 @@ const buildWebMapHtml = (markers, region) => {
         return;
       }
 
-      var marker = L.marker([item.latitude, item.longitude]).addTo(map);
+      var markerIcon = L.divIcon({
+        html: '<div class="poi-marker" style="background:' + item.color + '">' + item.icon + '</div>',
+        className: '',
+        iconSize: [34, 34],
+        iconAnchor: [17, 17],
+      });
+      var marker = L.marker([item.latitude, item.longitude], { icon: markerIcon }).addTo(map);
       var popupTitle = item.nameEscaped || 'POI';
       var popupCategory = item.category ? '<br/>' + item.category : '';
       marker.bindPopup('<b>' + popupTitle + '</b>' + popupCategory);
@@ -125,8 +150,14 @@ const buildWebMapHtml = (markers, region) => {
       }), '*');
     }
 
-    map.on('moveend', publishRegionChange);
-    map.on('zoomend', publishRegionChange);
+    var regionTimer = null;
+    function scheduleRegionChange() {
+      window.clearTimeout(regionTimer);
+      regionTimer = window.setTimeout(publishRegionChange, 160);
+    }
+
+    map.on('moveend', scheduleRegionChange);
+    map.on('zoomend', scheduleRegionChange);
   </script>
 </body>
 </html>`;
@@ -161,7 +192,7 @@ export default function MapScreen({ navigation }) {
   const [searchDebouncedText, setSearchDebouncedText] = useState('');
   const webMapHtml = useMemo(
     () => buildWebMapHtml(displayedMarkers, currentRegion),
-    [displayedMarkers, currentRegion]
+    [displayedMarkers]
   );
 
   useEffect(() => {
@@ -244,8 +275,8 @@ export default function MapScreen({ navigation }) {
         <ScrollView style={styles.bottomSheetContent} scrollEnabled={false}>
           <View style={styles.poiHeader}>
             <View style={styles.poiHeaderLeft}>
-              <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(selectedPOI.category) }]}>
-                <Text style={styles.categoryText}>{getCategoryName(selectedPOI.category)}</Text>
+              <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(selectedPOI.display_category || selectedPOI.category) }]}>
+                <Text style={styles.categoryText}>{getCategoryName(selectedPOI.display_category || selectedPOI.category)}</Text>
               </View>
               <Text style={styles.poiName}>{selectedPOI.name}</Text>
             </View>
@@ -305,6 +336,7 @@ export default function MapScreen({ navigation }) {
         handleMarkerPress={handleMarkerPress}
         navigation={navigation}
         getCategoryColor={getCategoryColor}
+        getCategoryIcon={getCategoryIcon}
         getCategoryName={getCategoryName}
         styles={styles}
       />

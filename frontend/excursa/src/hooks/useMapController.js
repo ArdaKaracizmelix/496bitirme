@@ -6,7 +6,15 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Platform, PermissionsAndroid } from 'react-native';
 import locationService from '../services/locationService';
-import { getViewportBounds, clusterMarkers, isValidCoordinates } from '../utils/mapUtils';
+import {
+  clusterMarkers,
+  dedupePOIs,
+  getRegionRadius,
+  getViewportBounds,
+  isPOIInViewport,
+  isValidCoordinates,
+  regionToZoom,
+} from '../utils/mapUtils';
 import useAuthStore from '../store/authStore';
 
 export const useMapController = () => {
@@ -39,6 +47,7 @@ export const useMapController = () => {
   const inFlightRequestKey = useRef(null);
   const dataModeRef = useRef('nearby'); // 'nearby' | 'search'
   const requestSequenceRef = useRef(0);
+  const poiCacheRef = useRef(new Map());
 
   /**
    * Check if distance moved is significant enough to warrant new API call
@@ -106,8 +115,27 @@ export const useMapController = () => {
    * @param {Object} region - Map region with latitude, longitude
    * @param {number} radius - Search radius in meters
    */
+  const buildDisplayMarkers = useCallback((pois, region) => {
+    const viewport = getViewportBounds(region);
+    const zoomLevel = regionToZoom(region);
+    const visiblePOIs = dedupePOIs(pois)
+      .filter((poi) => !viewport || isPOIInViewport(poi, viewport))
+      .sort((a, b) => String(a.id || a.name).localeCompare(String(b.id || b.name)));
+
+    return clusterMarkers(visiblePOIs, zoomLevel);
+  }, []);
+
+  const mergePOIsIntoCache = useCallback((pois) => {
+    dedupePOIs(pois).forEach((poi) => {
+      const key = poi.id || `${poi.name}-${poi.latitude.toFixed(5)}-${poi.longitude.toFixed(5)}`;
+      poiCacheRef.current.set(String(key), poi);
+    });
+  }, []);
+
+  const getCachedPOIs = useCallback(() => Array.from(poiCacheRef.current.values()), []);
+
   const fetchNearbyPlaces = useCallback(
-    async (region = currentRegion, radius = 5000, filterOverrides = null, options = {}) => {
+    async (region = currentRegion, radius = null, filterOverrides = null, options = {}) => {
       const { force = false } = options;
       // Validate coordinates
       if (!isValidCoordinates(region.latitude, region.longitude)) {
@@ -146,12 +174,16 @@ export const useMapController = () => {
         if (userInterests.length > 0) {
           filters.interests = userInterests;
         }
+        const viewport = getViewportBounds(region);
+        const effectiveRadius = radius || getRegionRadius(region);
 
         // Prevent duplicate in-flight requests for the exact same query.
         const requestKey = JSON.stringify({
-          lat: Number(region.latitude).toFixed(6),
-          lon: Number(region.longitude).toFixed(6),
-          radius,
+          north: viewport ? Number(viewport.north).toFixed(5) : null,
+          south: viewport ? Number(viewport.south).toFixed(5) : null,
+          east: viewport ? Number(viewport.east).toFixed(5) : null,
+          west: viewport ? Number(viewport.west).toFixed(5) : null,
+          radius: effectiveRadius,
           category: filters.category || null,
           min_rating: filters.min_rating || 0,
           interests_only: !!filters.interests_only,
@@ -164,20 +196,17 @@ export const useMapController = () => {
         inFlightRequestKey.current = requestKey;
         const requestId = ++requestSequenceRef.current;
 
-        // Fetch from API
-        let response = await locationService.fetchNearbyPOIs(
-          region.latitude,
-          region.longitude,
-          radius,
-          filters
-        );
+        let response = viewport
+          ? await locationService.fetchPOIsInViewport(viewport, filters)
+          : { results: [] };
 
-        // If nothing is found in 5km, widen search once.
-        if ((response.results || []).length === 0 && radius < 50000) {
+        // If viewport has no cached/server data, trigger nearby sync once with
+        // a radius derived from the current zoom level.
+        if ((response.results || []).length === 0) {
           response = await locationService.fetchNearbyPOIs(
             region.latitude,
             region.longitude,
-            50000,
+            effectiveRadius,
             filters
           );
         }
@@ -186,15 +215,8 @@ export const useMapController = () => {
           return;
         }
 
-        // Cluster markers if there are many
-        let markers = response.results || [];
-        const zoomLevel = regionToZoom(region);
-        if (markers.length > 50) {
-          const clustered = clusterMarkers(markers, zoomLevel);
-          setDisplayedMarkers(clustered);
-        } else {
-          setDisplayedMarkers(markers.map((poi) => ({ ...poi, type: 'marker' })));
-        }
+        mergePOIsIntoCache(response.results || []);
+        setDisplayedMarkers(buildDisplayMarkers(getCachedPOIs(), region));
 
         // Update last fetch coordinates
         lastFetchRegion.current = {
@@ -217,7 +239,7 @@ export const useMapController = () => {
         setIsFetching(false);
       }
     },
-    [currentRegion, activeFilters, hasMovedSignificantly, user]
+    [currentRegion, activeFilters, buildDisplayMarkers, getCachedPOIs, hasMovedSignificantly, mergePOIsIntoCache, user]
   );
 
   /**
@@ -228,6 +250,9 @@ export const useMapController = () => {
   const onRegionChangeComplete = useCallback(
     (region) => {
       setCurrentRegion(region);
+      if (dataModeRef.current === 'nearby') {
+        setDisplayedMarkers(buildDisplayMarkers(getCachedPOIs(), region));
+      }
 
       // Debounce API call
       if (fetchDebounceTimer.current) {
@@ -240,7 +265,7 @@ export const useMapController = () => {
         }
       }, 500);
     },
-    [fetchNearbyPlaces]
+    [buildDisplayMarkers, fetchNearbyPlaces, getCachedPOIs]
   );
 
   /**
@@ -265,7 +290,7 @@ export const useMapController = () => {
         longitudeDelta: 0.05,
       };
       setCurrentRegion(newRegion);
-      fetchNearbyPlaces(newRegion, 5000, null, { force: true });
+      fetchNearbyPlaces(newRegion, null, null, { force: true });
     }
   }, [fetchNearbyPlaces]);
 
@@ -280,7 +305,7 @@ export const useMapController = () => {
     if (!normalizedQuery) {
       dataModeRef.current = 'nearby';
       // Restore nearby markers when search is cleared.
-      fetchNearbyPlaces(currentRegion, 5000, null, { force: true });
+      fetchNearbyPlaces(currentRegion, null, null, { force: true });
       return;
     }
 
@@ -294,8 +319,7 @@ export const useMapController = () => {
       if (requestId !== requestSequenceRef.current || dataModeRef.current !== 'search') {
         return;
       }
-      const markers = (response.results || []).map((poi) => ({ ...poi, type: 'marker' }));
-      setDisplayedMarkers(markers);
+      setDisplayedMarkers(dedupePOIs(response.results || []).map((poi) => ({ ...poi, type: 'marker' })));
     } catch (err) {
       console.error('Error searching:', err);
       setError('Search failed');
@@ -312,8 +336,9 @@ export const useMapController = () => {
     (filters) => {
       const nextFilters = { ...activeFilters, ...filters };
       setActiveFilters(nextFilters);
+      poiCacheRef.current.clear();
       // Re-fetch with new filters
-      fetchNearbyPlaces(currentRegion, 5000, nextFilters);
+      fetchNearbyPlaces(currentRegion, null, nextFilters, { force: true });
     },
     [currentRegion, fetchNearbyPlaces, activeFilters]
   );
@@ -325,8 +350,9 @@ export const useMapController = () => {
     const resetFilters = { category: null, minRating: 0, interestsOnly: false };
     setActiveFilters(resetFilters);
     setSearchQuery('');
+    poiCacheRef.current.clear();
     dataModeRef.current = 'nearby';
-    fetchNearbyPlaces(currentRegion, 5000, resetFilters, { force: true });
+    fetchNearbyPlaces(currentRegion, null, resetFilters, { force: true });
   }, [currentRegion, fetchNearbyPlaces]);
 
   /**
@@ -391,10 +417,3 @@ export const useMapController = () => {
 };
 
 export default useMapController;
-  const regionToZoom = (region) => {
-    if (typeof region?.zoomLevel === 'number' && Number.isFinite(region.zoomLevel)) {
-      return Math.max(2, Math.min(18, Math.round(region.zoomLevel)));
-    }
-    const latDelta = Number(region?.latitudeDelta) || 0.1;
-    return Math.max(2, Math.min(18, Math.round(Math.log2(360 / Math.max(latDelta, 0.0001)))));
-  };

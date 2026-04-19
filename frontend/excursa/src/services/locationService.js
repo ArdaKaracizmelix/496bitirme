@@ -52,7 +52,7 @@ export const locationService = {
    * @param {Object} viewport - { north, south, east, west }
    * @returns {Promise<Object>} - { count, results: POI[] }
    */
-  fetchPOIsInViewport: async (viewport) => {
+  fetchPOIsInViewport: async (viewport, filters = {}) => {
     try {
       const params = new URLSearchParams({
         north: viewport.north.toString(),
@@ -60,6 +60,12 @@ export const locationService = {
         east: viewport.east.toString(),
         west: viewport.west.toString(),
       });
+      if (filters.category) {
+        params.append('category', filters.category);
+      }
+      if (filters.min_rating) {
+        params.append('min_rating', filters.min_rating.toString());
+      }
 
       const response = await api.get(`/locations/pois/viewport/?${params}`, {
         skipAuth: true,
@@ -94,7 +100,17 @@ export const locationService = {
    */
   fetchAvailableCities: async (query = '') => {
     const typed = String(query || '').trim();
-    if (typed.length < 2) return [];
+    if (typed.length < 2) {
+      try {
+        const response = await api.get('/locations/pois/cities/', {
+          skipAuth: true,
+        });
+        return response.data?.results || [];
+      } catch (error) {
+        console.error('Error fetching supported cities:', error);
+        return [];
+      }
+    }
 
     // Primary: global city search (dynamic, worldwide, not fixed local list)
     try {

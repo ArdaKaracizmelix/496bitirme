@@ -4,14 +4,60 @@ for geospatial operations and external data synchronization.
 """
 import geohash2
 import requests
+import time
 from typing import Dict, List, Optional, Tuple
 from django.contrib.gis.geos import Point, Polygon
 from django.contrib.gis.measure import Distance
 from django.db.models import QuerySet, Case, When, Value, IntegerField
 from django.db.models import Q
 from django.conf import settings
-from user.poi_categorization import categorize_google_place, map_derived_category_to_poi_category
+from user.poi_categorization import (
+    MEANINGFUL_POI_BLOCK_TYPES,
+    categorize_google_place,
+    map_derived_category_to_poi_category,
+)
 from .models import POI
+
+
+TRAVEL_SYNC_MIN_EXPECTED_RESULTS = 25
+TRAVEL_SYNC_DEFAULT_RADIUS_M = 20000
+TRAVEL_SYNC_MAX_RADIUS_M = 50000
+GOOGLE_NEXT_PAGE_DELAY_SECONDS = 2
+
+GOOGLE_PLACE_SEARCH_PROFILES = [
+    {'type': 'tourist_attraction'},
+    {'type': 'museum'},
+    {'type': 'park'},
+    {'type': 'art_gallery'},
+    {'keyword': 'historical landmark'},
+    {'keyword': 'monument'},
+    {'keyword': 'scenic viewpoint'},
+    {'keyword': 'cultural center'},
+    {'keyword': 'archaeological site'},
+    {'keyword': 'castle'},
+    {'keyword': 'landmark'},
+]
+
+# Foursquare high-level category roots: Arts & Entertainment,
+# Outdoors & Recreation, Travel & Transportation. Food/shopping are
+# intentionally excluded from the map POI sync pipeline.
+FOURSQUARE_TRAVEL_CATEGORY_IDS = '10000,16000,19000'
+
+TRAVEL_GENERIC_NAME_BLOCKLIST = {
+    'atm', 'bank', 'banka', 'eczane', 'pharmacy', 'hospital', 'hastane',
+    'doctor', 'doktor', 'dentist', 'dis hekimi', 'diş hekimi',
+    'muayenehane', 'clinic', 'klinik', 'medical', 'veterinary', 'veteriner',
+    'insurance', 'sigorta', 'lawyer', 'avukat', 'accounting', 'muhasebe',
+    'car repair', 'oto servis', 'locksmith', 'çilingir', 'cilingir',
+    'government', 'belediye', 'kaymakamlik', 'kaymakamlık', 'valilik',
+    'noter', 'post office', 'ptt', 'gas station', 'benzin', 'otopark',
+    'parking', 'plumber', 'tesisat', 'electrician', 'elektrikci', 'elektrikçi',
+    'hardware', 'hırdavat', 'hirdavat',
+    'burger king', 'mcdonald', 'kfc', 'dominos', 'domino', 'penti', 'lc waikiki',
+    'defacto', 'gratis', 'bim', 'a101', 'sok market', 'şok market', 'migros',
+    'carrefour', 'market', 'supermarket', 'mall', 'avm', 'store', 'magaza',
+    'mağaza', 'clothing', 'shoe', 'electronics',
+}
 
 
 class GeoService:
@@ -22,6 +68,37 @@ class GeoService:
     """
 
     NON_TOURISM_TAGS = {
+        *MEANINGFUL_POI_BLOCK_TYPES,
+        'atm',
+        'bank',
+        'finance',
+        'insurance',
+        'lawyer',
+        'accounting',
+        'pharmacy',
+        'drugstore',
+        'hospital',
+        'doctor',
+        'dentist',
+        'physiotherapist',
+        'veterinary_care',
+        'veterinary',
+        'medical',
+        'medical_center',
+        'clinic',
+        'police',
+        'post_office',
+        'government',
+        'government_office',
+        'local_government_office',
+        'car_repair',
+        'locksmith',
+        'electrician',
+        'plumber',
+        'hardware_store',
+        'gas_station',
+        'parking',
+        'real_estate_agency',
         'school',
         'primary_school',
         'secondary_school',
@@ -75,6 +152,27 @@ class GeoService:
         if tag_query is None:
             return queryset
         return queryset.exclude(tag_query)
+
+    @staticmethod
+    def apply_category_filter(queryset: QuerySet, category: str) -> QuerySet:
+        normalized = str(category or '').strip().upper()
+        if not normalized:
+            return queryset
+        if normalized == 'CULTURE':
+            return queryset.filter(
+                Q(category=POI.Category.HISTORICAL, metadata__derived_category='CULTURE')
+                | Q(tags__contains=['cultural_center'])
+                | Q(tags__contains=['art_gallery'])
+                | Q(tags__contains=['performing_arts_theater'])
+            )
+        if normalized == 'VIEWPOINT':
+            return queryset.filter(
+                Q(tags__contains=['viewpoint'])
+                | Q(tags__contains=['scenic_spot'])
+                | Q(tags__contains=['observation_deck'])
+                | Q(metadata__primary_category='viewpoint')
+            )
+        return queryset.filter(category=normalized)
 
     @staticmethod
     def _map_interests_to_categories(interests: List[str]) -> List[str]:
@@ -161,7 +259,7 @@ class GeoService:
         
         # Apply optional filters
         if 'category' in filters:
-            queryset = queryset.filter(category=filters['category'])
+            queryset = GeoService.apply_category_filter(queryset, filters['category'])
         
         if 'min_rating' in filters:
             queryset = queryset.filter(average_rating__gte=filters['min_rating'])
@@ -323,7 +421,13 @@ class ExternalSyncService:
         self.FSQ_API_KEY = fsq_api_key or settings.FOURSQUARE_API_KEY
         self.rate_limiter = RateLimiter()
     
-    def fetch_and_sync(self, lat: float, lon: float) -> int:
+    def fetch_and_sync(
+        self,
+        lat: float,
+        lon: float,
+        radius_m: int = TRAVEL_SYNC_DEFAULT_RADIUS_M,
+        city: str | None = None,
+    ) -> int:
         """
         Main sync method that:
         1. Queries external API for places near coordinates
@@ -333,37 +437,44 @@ class ExternalSyncService:
         Args:
             lat: Latitude coordinate
             lon: Longitude coordinate
+            radius_m: Search radius in meters. Larger city syncs should pass
+                20-50km instead of the default map exploration radius.
+            city: Optional resolved city label stored in metadata.
             
         Returns:
             Integer count of newly added POI records
         """
         new_count = 0
+        radius_m = max(2000, min(int(radius_m or TRAVEL_SYNC_DEFAULT_RADIUS_M), TRAVEL_SYNC_MAX_RADIUS_M))
         
         # there can be different APIs to fetch data, for now we are fetching from google and foursquare, but in the future there can be more APIs added, so we can add more methods to fetch data from different APIs.
 
         # Fetch from Google Places API
-        google_places = self._fetch_google_places(lat, lon)
+        google_places = self._fetch_google_places(lat, lon, radius_m=radius_m)
         for place_data in google_places:
             dto = self._parse_google_place(place_data)
+            dto.metadata['city'] = city or dto.metadata.get('city')
             poi = self.upsert_poi(dto)
             if poi:
                 new_count += 1
         
         # Fetch from Foursquare API
-        fsq_places = self._fetch_foursquare_places(lat, lon)
+        fsq_places = self._fetch_foursquare_places(lat, lon, radius_m=radius_m)
         for place_data in fsq_places:
             dto = self._parse_fsq_place(place_data)
+            dto.metadata['city'] = city or dto.metadata.get('city')
             poi = self.upsert_poi(dto)
             if poi:
                 new_count += 1
 
         # Fallback: enrich from OSM when provider APIs are unavailable or sparse.
-        if new_count < 8:
-            osm_places = self._fetch_osm_places(lat, lon)
+        if new_count < TRAVEL_SYNC_MIN_EXPECTED_RESULTS:
+            osm_places = self._fetch_osm_places(lat, lon, radius_m=radius_m)
             for place_data in osm_places:
                 dto = self._parse_osm_place(place_data)
                 if not dto:
                     continue
+                dto.metadata['city'] = city or dto.metadata.get('city')
                 poi = self.upsert_poi(dto)
                 if poi:
                     new_count += 1
@@ -388,7 +499,8 @@ class ExternalSyncService:
                 [data.category] + normalized_tags,
                 data.name,
             )
-            if not classification.get('is_meaningful_poi'):
+            quality_score = self._quality_score(data, classification)
+            if not classification.get('is_meaningful_poi') or quality_score <= 0:
                 return None
 
             mapped_category = map_derived_category_to_poi_category(
@@ -398,19 +510,43 @@ class ExternalSyncService:
             if not mapped_category:
                 return None
 
+            duplicate = self._find_duplicate_poi(data)
+            metadata = {
+                **(data.metadata or {}),
+                'source': (data.metadata or {}).get('source') or self._infer_source_from_external_id(data.external_id),
+                'raw_types': classification.get('raw_types', []),
+                'primary_category': classification.get('primary_type'),
+                'derived_category': classification.get('derived_category'),
+                'quality_score': quality_score,
+                'categorization': classification,
+            }
+            rating = data.metadata.get('rating') if isinstance(data.metadata, dict) else None
+            try:
+                average_rating = float(rating) if rating is not None else 0.0
+            except (TypeError, ValueError):
+                average_rating = 0.0
+
+            defaults = {
+                'name': data.name,
+                'address': data.address,
+                'location': Point(data.lon, data.lat),
+                'category': mapped_category,
+                'average_rating': average_rating,
+                'metadata': metadata,
+                'tags': self._normalize_tags(normalized_tags + classification.get('effective_types', [])),
+            }
+
+            if duplicate:
+                for field, value in defaults.items():
+                    setattr(duplicate, field, value)
+                if data.external_id and not duplicate.external_id:
+                    duplicate.external_id = data.external_id
+                duplicate.save()
+                return None
+
             poi, created = POI.objects.update_or_create(
                 external_id=data.external_id,
-                defaults={
-                    'name': data.name,
-                    'address': data.address,
-                    'location': Point(data.lon, data.lat),
-                    'category': mapped_category,
-                    'metadata': {
-                        **(data.metadata or {}),
-                        'categorization': classification,
-                    },
-                    'tags': self._normalize_tags(normalized_tags + classification.get('effective_types', [])),
-                }
+                defaults=defaults,
             )
             return poi if created else None
         except Exception as e:
@@ -462,7 +598,7 @@ class ExternalSyncService:
         classification = categorize_google_place([external_cat] + (tags or []), name)
         mapped = map_derived_category_to_poi_category(
             classification.get('derived_category'),
-            fallback=POI.Category.ENTERTAINMENT,
+            fallback=None,
         )
         return mapped or POI.Category.ENTERTAINMENT
 
@@ -474,64 +610,220 @@ class ExternalSyncService:
                 normalized.append(value)
         # Keep deterministic unique order
         return list(dict.fromkeys(normalized))
+
+    def _quality_score(self, data: 'ExternalPlaceDTO', classification: Dict) -> int:
+        """
+        Conservative travel relevance score. Returns 0 for places we should not
+        write to POI storage at all.
+        """
+        if not data or not data.name or data.lat in (None, 0) or data.lon in (None, 0):
+            return 0
+
+        normalized_tags = set(self._normalize_tags([data.category] + (data.tags or [])))
+        effective_types = set(classification.get('effective_types') or [])
+        all_types = normalized_tags | effective_types
+
+        lowered_name = str(data.name or '').strip().lower()
+        if any(blocked in lowered_name for blocked in TRAVEL_GENERIC_NAME_BLOCKLIST):
+            return 0
+        if all_types & MEANINGFUL_POI_BLOCK_TYPES:
+            return 0
+        if not classification.get('allowed_types'):
+            return 0
+
+        metadata = data.metadata or {}
+        rating = metadata.get('rating')
+        review_count = (
+            metadata.get('user_ratings_total')
+            or metadata.get('review_count')
+            or metadata.get('stats', {}).get('total_ratings')
+            or 0
+        )
+        try:
+            rating_value = float(rating) if rating is not None else 0.0
+        except (TypeError, ValueError):
+            rating_value = 0.0
+        try:
+            review_count_value = int(review_count or 0)
+        except (TypeError, ValueError):
+            review_count_value = 0
+
+        derived = str(classification.get('derived_category') or '').upper()
+        is_food = derived == 'FOOD' or bool(all_types & {'restaurant', 'cafe', 'bakery', 'coffee_shop'})
+        is_commercial = bool(all_types & {
+            'store',
+            'shopping_mall',
+            'clothing_store',
+            'shoe_store',
+            'electronics_store',
+            'supermarket',
+            'convenience_store',
+            'department_store',
+            'market',
+            'food',
+            'fast_food',
+            'meal_takeaway',
+            'meal_delivery',
+        })
+
+        # Map POIs should be sightseeing-first. Food/commercial places are
+        # handled by curated city knowledge/chatbot, not by external map sync.
+        if is_food or is_commercial or derived in {'FOOD', 'SHOPPING', 'WELLNESS', 'LODGING'}:
+            return 0
+
+        score = 20
+        score += 20 if classification.get('primary_type') else 0
+        score += min(review_count_value, 200) // 10
+        score += int(rating_value * 4) if rating_value else 0
+
+        return score
+
+    def _infer_source_from_external_id(self, external_id: str | None) -> str:
+        value = str(external_id or '')
+        if value.startswith('osm-'):
+            return 'osm_overpass'
+        if value.startswith('fsq') or len(value) == 24:
+            return 'foursquare'
+        return 'google_places'
+
+    def _find_duplicate_poi(self, data: 'ExternalPlaceDTO') -> Optional[POI]:
+        """Avoid duplicate providers creating the same place twice."""
+        if not data or not data.name:
+            return None
+        if data.external_id:
+            existing = POI.objects.filter(external_id=data.external_id).first()
+            if existing:
+                return existing
+        try:
+            point = Point(float(data.lon), float(data.lat))
+        except (TypeError, ValueError):
+            return None
+        return (
+            POI.objects
+            .filter(name__iexact=str(data.name).strip())
+            .filter(location__distance_lte=(point, Distance(m=60)))
+            .first()
+        )
     
     # Private helper methods
     
-    def _fetch_google_places(self, lat: float, lon: float) -> List[Dict]:
-        """Fetch places from Google Places API"""
+    def _fetch_google_places(
+        self,
+        lat: float,
+        lon: float,
+        radius_m: int = TRAVEL_SYNC_DEFAULT_RADIUS_M,
+    ) -> List[Dict]:
+        """
+        Fetch travel-relevant places from Google Places API.
+        Uses multiple focused searches instead of one generic nearby request,
+        because generic nearbysearch often returns pharmacies, ATMs and offices.
+        """
         if not self.GOOGLE_API_KEY:
             return []
         
         url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-        params = {
-            'location': f"{lat},{lon}",
-            'radius': 5000,
-            'key': self.GOOGLE_API_KEY,
-        }
-        
-        try:
-            response = requests.get(url, params=params)
-            self.rate_limiter.check_limit()
-            return response.json().get('results', [])
-        except Exception as e:
-            print(f"Error fetching from Google Places: {str(e)}")
-            return []
+        radius_m = max(2000, min(int(radius_m or TRAVEL_SYNC_DEFAULT_RADIUS_M), TRAVEL_SYNC_MAX_RADIUS_M))
+        results_by_place_id = {}
+
+        for profile in GOOGLE_PLACE_SEARCH_PROFILES:
+            params = {
+                'location': f"{lat},{lon}",
+                'radius': radius_m,
+                'key': self.GOOGLE_API_KEY,
+            }
+            params.update(profile)
+
+            for item in self._fetch_google_nearby_pages(url, params):
+                place_id = item.get('place_id')
+                if not place_id:
+                    continue
+                results_by_place_id[place_id] = item
+
+        return list(results_by_place_id.values())
+
+    def _fetch_google_nearby_pages(self, url: str, params: Dict) -> List[Dict]:
+        """Fetch up to three Google Nearby Search pages for one query profile."""
+        results = []
+        page_params = dict(params)
+        for page_index in range(3):
+            try:
+                if page_index > 0:
+                    time.sleep(GOOGLE_NEXT_PAGE_DELAY_SECONDS)
+                response = requests.get(url, params=page_params, timeout=10)
+                self.rate_limiter.check_limit()
+                response.raise_for_status()
+                payload = response.json()
+            except Exception as e:
+                print(f"Error fetching from Google Places: {str(e)}")
+                break
+
+            status = payload.get('status')
+            if status not in {'OK', 'ZERO_RESULTS'}:
+                print(f"Google Places returned status={status}: {payload.get('error_message')}")
+                break
+
+            results.extend(payload.get('results', []))
+            next_page_token = payload.get('next_page_token')
+            if not next_page_token:
+                break
+            page_params = {
+                'pagetoken': next_page_token,
+                'key': params.get('key'),
+            }
+        return results
     
-    def _fetch_foursquare_places(self, lat: float, lon: float) -> List[Dict]:
-        """Fetch places from Foursquare API"""
+    def _fetch_foursquare_places(
+        self,
+        lat: float,
+        lon: float,
+        radius_m: int = TRAVEL_SYNC_DEFAULT_RADIUS_M,
+    ) -> List[Dict]:
+        """Fetch travel/food/outdoor places from Foursquare API"""
         if not self.FSQ_API_KEY:
             return []
         
         url = "https://api.foursquare.com/v3/places/search"
         params = {
             'll': f"{lat},{lon}",
-            'radius': 5000,
+            'radius': max(2000, min(int(radius_m or TRAVEL_SYNC_DEFAULT_RADIUS_M), 100000)),
             'limit': 50,
+            'categories': FOURSQUARE_TRAVEL_CATEGORY_IDS,
+            'sort': 'RATING',
+            'fields': 'fsq_id,name,geocodes,location,categories,rating,stats,distance',
         }
         headers = {
-            'Authorization': f"Bearer {self.FSQ_API_KEY}",
+            'Authorization': self.FSQ_API_KEY,
             'Accept': 'application/json',
         }
         
         try:
-            response = requests.get(url, params=params, headers=headers)
+            response = requests.get(url, params=params, headers=headers, timeout=10)
             self.rate_limiter.check_limit()
+            response.raise_for_status()
             return response.json().get('results', [])
         except Exception as e:
             print(f"Error fetching from Foursquare: {str(e)}")
             return []
 
-    def _fetch_osm_places(self, lat: float, lon: float) -> List[Dict]:
+    def _fetch_osm_places(
+        self,
+        lat: float,
+        lon: float,
+        radius_m: int = TRAVEL_SYNC_DEFAULT_RADIUS_M,
+    ) -> List[Dict]:
         """Fetch fallback places from OpenStreetMap Overpass."""
+        radius_m = max(2000, min(int(radius_m or TRAVEL_SYNC_DEFAULT_RADIUS_M), 15000))
         query = f"""
 [out:json][timeout:20];
 (
-  node(around:4000,{lat},{lon})[amenity~"restaurant|cafe|fast_food|bar|pub|bakery|ice_cream|tea"];
-  way(around:4000,{lat},{lon})[amenity~"restaurant|cafe|fast_food|bar|pub|bakery|ice_cream|tea"];
-  node(around:4000,{lat},{lon})[tourism~"museum|attraction|gallery|viewpoint"];
-  way(around:4000,{lat},{lon})[tourism~"museum|attraction|gallery|viewpoint"];
-  node(around:4000,{lat},{lon})[leisure~"park|garden"];
-  way(around:4000,{lat},{lon})[leisure~"park|garden"];
+  node(around:{radius_m},{lat},{lon})[tourism~"museum|attraction|gallery|viewpoint|artwork|information"];
+  way(around:{radius_m},{lat},{lon})[tourism~"museum|attraction|gallery|viewpoint|artwork|information"];
+  node(around:{radius_m},{lat},{lon})[historic~"monument|castle|archaeological_site|memorial|ruins|fort"];
+  way(around:{radius_m},{lat},{lon})[historic~"monument|castle|archaeological_site|memorial|ruins|fort"];
+  node(around:{radius_m},{lat},{lon})[leisure~"park|garden|nature_reserve"];
+  way(around:{radius_m},{lat},{lon})[leisure~"park|garden|nature_reserve"];
+  node(around:{radius_m},{lat},{lon})[natural~"peak|beach|spring|water|wood|cliff|cave_entrance"];
+  way(around:{radius_m},{lat},{lon})[natural~"peak|beach|spring|water|wood|cliff|cave_entrance"];
 );
 out center 120;
 """.strip()
@@ -551,6 +843,7 @@ out center 120;
     def _parse_google_place(self, place_data: Dict) -> 'ExternalPlaceDTO':
         """Parse Google Places API response"""
         place_types = place_data.get('types', [])
+        photos = place_data.get('photos') or []
         return ExternalPlaceDTO(
             external_id=place_data.get('place_id'),
             name=place_data.get('name'),
@@ -559,9 +852,10 @@ out center 120;
             lon=place_data['geometry']['location']['lng'],
             category=(place_types[0] if place_types else 'other'),
             metadata={
+                'source': 'google_places',
                 'rating': place_data.get('rating'),
                 'user_ratings_total': place_data.get('user_ratings_total'),
-                'photo_url': place_data.get('photos', [{}])[0].get('photo_reference'),
+                'photo_url': photos[0].get('photo_reference') if photos else None,
             },
             tags=self._normalize_tags(place_types),
         )
@@ -569,6 +863,8 @@ out center 120;
     def _parse_fsq_place(self, place_data: Dict) -> 'ExternalPlaceDTO':
         """Parse Foursquare API response"""
         location = place_data.get('location', {})
+        geocodes = place_data.get('geocodes') or {}
+        main_geocode = geocodes.get('main') or {}
         categories = place_data.get('categories', [])
         primary_category = categories[0].get('name', 'other') if categories else 'other'
         category_tags = [c.get('name') for c in categories]
@@ -576,11 +872,13 @@ out center 120;
             external_id=place_data.get('fsq_id'),
             name=place_data.get('name'),
             address=location.get('formatted_address'),
-            lat=location.get('lat', 0),
-            lon=location.get('lon', 0),
+            lat=main_geocode.get('latitude'),
+            lon=main_geocode.get('longitude'),
             category=primary_category,
             metadata={
+                'source': 'foursquare',
                 'rating': place_data.get('rating'),
+                'review_count': (place_data.get('stats') or {}).get('total_ratings'),
                 'distance': place_data.get('distance'),
             },
             tags=self._normalize_tags(category_tags),
@@ -611,7 +909,9 @@ out center 120;
         amenity = str(tags.get('amenity') or '').strip()
         tourism = str(tags.get('tourism') or '').strip()
         leisure = str(tags.get('leisure') or '').strip()
-        category = amenity or tourism or leisure or 'other'
+        historic = str(tags.get('historic') or '').strip()
+        natural = str(tags.get('natural') or '').strip()
+        category = amenity or tourism or historic or leisure or natural or 'other'
 
         street_bits = [
             str(tags.get('addr:street') or '').strip(),
@@ -631,7 +931,14 @@ out center 120;
             return None
         external_id = f"osm-{place_type}-{element_id}"
 
-        tag_values = [amenity, tourism, leisure, str(tags.get('cuisine') or '').strip()]
+        tag_values = [
+            amenity,
+            tourism,
+            historic,
+            leisure,
+            natural,
+            str(tags.get('cuisine') or '').strip(),
+        ]
 
         return ExternalPlaceDTO(
             external_id=external_id,

@@ -71,7 +71,8 @@ def chat_api(request):
         return JsonResponse({
             "intent": result["intent"],
             "response": result["response"],
-            "history": result["history"]
+            "history": result["history"],
+            "metadata": result.get("metadata", {}),
         }, status=200)
 
     except json.JSONDecodeError:
@@ -143,6 +144,7 @@ class ChatSessionViewSet(viewsets.ModelViewSet):
                         sender=ChatMessage.Sender.BOT,
                         message_type=ChatMessage.MessageType.TEXT,
                         content=result.get("response", ""),
+                        metadata=result.get("metadata", {}),
                         intent=result.get("intent", ""),
                         confidence=result.get("confidence", 0.0),
                     )

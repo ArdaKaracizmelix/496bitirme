@@ -1,36 +1,59 @@
 import unittest
-from unittest.mock import patch
+
 from ai_service.services.chat_session import ChatSession
 
 
 class ChatSessionTest(unittest.TestCase):
+    def test_food_question_returns_local_foods(self):
+        chat = ChatSession(user_id=None)
+        chat.llm_client = None
 
-    @patch("ai_service.services.chat_session.LLMClient")
-    def test_process_message(self, mock_llm_client_class):
+        result = chat.process_message("Gaziantep yemek oner")
 
-        # Fake LLM cevabı
-        mock_llm_instance = mock_llm_client_class.return_value
-        mock_llm_instance.generate_response.return_value = (
-            "Ankara'da hafta sonu için Anıtkabir ve Hamamönü'nü ziyaret edebilirsiniz."
-        )
+        self.assertEqual(result["intent"], "food_recommendation")
+        self.assertIn("baklava", result["response"].lower())
+        self.assertIn("Restoran ismi uydurmuyorum", result["response"])
 
-        chat = ChatSession(user_id="test-user")
+    def test_general_city_uses_hybrid_catalog_when_internal_poi_is_missing(self):
+        chat = ChatSession(user_id=None)
+        chat.llm_client = None
 
-        result = chat.process_message("Bana Ankara için gezi öner")
+        result = chat.process_message("Sanliurfa 2 gunluk tarihi gezi plani yap")
 
-        # Intent doğru mu
-        self.assertEqual(result["intent"], "travel_recommendation")
+        self.assertEqual(result["intent"], "trip_plan")
+        self.assertIn("Gun 1:", result["response"])
+        self.assertIn("Gun 2:", result["response"])
+        self.assertNotIn("Gun 3:", result["response"])
+        self.assertIn("Gobeklitepe", result["response"])
 
-        # LLM cevabı doğru mu
-        self.assertEqual(
-            result["response"],
-            "Ankara'da hafta sonu için Anıtkabir ve Hamamönü'nü ziyaret edebilirsiniz."
-        )
+    def test_historical_place_recommendations_include_context(self):
+        chat = ChatSession(user_id=None)
+        chat.llm_client = None
 
-        # History kontrol
-        self.assertEqual(len(result["history"]), 2)
-        self.assertEqual(result["history"][0]["role"], "user")
-        self.assertEqual(result["history"][1]["role"], "assistant")
+        result = chat.process_message("Ankara tarihi yerler oner")
+
+        self.assertEqual(result["intent"], "historical_places")
+        self.assertIn("Anitkabir", result["response"])
+        self.assertIn("Cumhuriyet", result["response"])
+
+    def test_nature_question_uses_nature_candidates(self):
+        chat = ChatSession(user_id=None)
+        chat.llm_client = None
+
+        result = chat.process_message("Rize dogal yerler oner")
+
+        self.assertEqual(result["intent"], "nature_recommendation")
+        self.assertIn("Ayder", result["response"])
+
+    def test_out_of_scope_is_rejected(self):
+        chat = ChatSession(user_id=None)
+        chat.llm_client = None
+
+        result = chat.process_message("2 + 2 kac eder?")
+
+        self.assertEqual(result["intent"], "out_of_scope")
+        self.assertFalse(result["metadata"]["in_scope"])
+        self.assertIn("uygulama kapsamim disinda", result["response"])
 
 
 if __name__ == "__main__":

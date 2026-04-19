@@ -1,743 +1,284 @@
-/**
- * ChatbotScreen - Main UI Component for AI Assistant
- * 
- * Features:
- * - Real-time chat with AI assistant
- * - Voice interaction support
- * - Quick reply suggestions
- * - Message typing indicator
- * - Conversation history management
- * - Rich message rendering (text, cards, suggestions)
- * 
- * State Management:
- * - messages: Array of ChatMessage objects
- * - inputText: Current input field value
- * - isTyping: Indicator for bot typing status
- * - isVoiceActive: Microphone listening state
- * - sessionId: Current conversation session ID
- */
-
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
-  Modal,
   Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
 import ChatManager from '../../services/ChatManager';
 import chatService from '../../services/chatService';
-import TTSEngine from '../../services/TTSEngine';
-import locationService from '../../services/locationService';
+
+const COLORS = {
+  bg: '#f7f3ec',
+  surface: '#fffdf8',
+  surfaceStrong: '#ffffff',
+  ink: '#17172a',
+  muted: '#77736d',
+  line: '#ece4d8',
+  brand: '#17172a',
+  brandSoft: '#ece8ff',
+  accent: '#c06f38',
+  success: '#2c8a5d',
+  danger: '#b93c3c',
+};
 
 const QUICK_REPLIES = [
-  'İstanbul\'da ne gezmeliyim?',
-  'Yakınımdaki restoranlar',
-  'Tarihi yerler öner',
-  'Bütçe dostu rotalar',
+  "Istanbul'da 2 gunluk rota yap",
+  'Sanliurfa tarihi gezi plani',
+  'Ankara tarihi yerler oner',
+  'Yemek odakli rota hazirla',
 ];
 
-const TABLE_SEPARATOR_REGEX = /^(\s*\|?\s*:?-{3,}:?\s*\|)+\s*$/;
-const GENERIC_PLACE_LABELS = new Set([
-  'bolge',
-  'önerilen yerler',
-  'onerilen yerler',
-  'neden ziyaret edilmeli',
-  'şehir merkezi',
-  'sehir merkezi',
-  'kültür & sanat',
-  'kultur & sanat',
-  'kultur sanat',
-  'kültür sanat',
-]);
+const createWelcomeMessage = () => ({
+  id: `welcome-${Date.now()}`,
+  type: 'bot',
+  messageType: 'text',
+  content:
+    'Merhaba, ben Excursa Asistan. Sehir, gun sayisi ve ilgi alanini yaz; sana gun gun, okunabilir bir gezi plani hazirlayayim.',
+  timestamp: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+  metadata: {},
+});
 
 const formatBotText = (content) => {
-  if (typeof content !== 'string') {
-    return '';
-  }
-
-  // Normalize common LLM formatting artifacts for plain Text rendering.
-  let text = content
+  if (typeof content !== 'string') return '';
+  return content
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/\r\n/g, '\n')
-    .replace(/\*\*(.*?)\*\*/g, '$1');
-
-  text = text
-    .split('\n')
-    .filter((line) => !TABLE_SEPARATOR_REGEX.test(line.trim()))
-    .map((line) => {
-      const trimmed = line.trim();
-      const pipeCount = (trimmed.match(/\|/g) || []).length;
-
-      // Convert markdown table rows into bullet lines.
-      if (pipeCount >= 2 && trimmed.includes('|')) {
-        const cells = trimmed
-          .split('|')
-          .map((cell) => cell.trim())
-          .filter(Boolean);
-        if (cells.length > 1) {
-          return `• ${cells.join(' - ')}`;
-        }
-      }
-
-      return line;
-    })
-    .join('\n')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/^#{1,6}\s*/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-
-  return text;
 };
 
-const normalizeKey = (text) =>
-  String(text || '')
-    .toLocaleLowerCase('tr-TR')
-    .replace(/[^\p{L}\p{N}\s&-]/gu, '')
-    .trim();
+const normalizeMessage = (msg) => ({
+  id: msg.id,
+  type: msg.sender || msg.type,
+  messageType: msg.message_type || msg.messageType || 'text',
+  content: msg.content || '',
+  timestamp: msg.created_at
+    ? new Date(msg.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+    : msg.timestamp || new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+  metadata: msg.metadata || {},
+  intent: msg.intent,
+  confidence: msg.confidence,
+});
 
-const extractSuggestedPlaceNames = (content) => {
-  if (typeof content !== 'string' || !content.trim()) return [];
-
-  const candidates = [];
-  const boldMatches = [...content.matchAll(/\*\*([^*]{2,60})\*\*/g)];
-  for (const match of boldMatches) {
-    candidates.push(match[1].trim());
-  }
-
-  // Fallback extraction from common list patterns (e.g., "• Anıtkabir - ...")
-  const lines = content.split('\n');
-  for (const line of lines) {
-    const bulletMatch = line.match(/^[\s•-]*([^–\-|:]{3,50})\s*[–\-|:]/u);
-    if (bulletMatch) candidates.push(bulletMatch[1].trim());
-  }
-
-  const deduped = [];
-  const seen = new Set();
-  for (const item of candidates) {
-    const key = normalizeKey(item);
-    if (!key || GENERIC_PLACE_LABELS.has(key) || seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(item);
-  }
-
-  return deduped.slice(0, 5);
-};
-
-/**
- * ChatbotScreen Component
- * 
- * Props:
- * - sessionId (optional): Pre-existing session ID to load
- * - onNavigateToPOI (optional): Callback when user wants to view a POI
- * - onNavigateToItinerary (optional): Callback when user wants to add to itinerary
- */
-export default function ChatbotScreen({ sessionId, onNavigateToPOI, onNavigateToItinerary }) {
+export default function ChatbotScreen({ sessionId, navigation }) {
   const insets = useSafeAreaInsets();
-  const flatListRef = useRef(null);
+  const { width } = useWindowDimensions();
+  const listRef = useRef(null);
   const chatManagerRef = useRef(null);
-  const ttsEngineRef = useRef(null);
-  const speechRecognitionRef = useRef(null);
 
-  // State Management
-  const [messages, setMessages] = useState([
-    {
-      id: '1',
-      type: 'bot',
-      messageType: 'text',
-      content: 'Merhaba! Ben EXCURSA\'nın AI asistanıyım. 🌍 Size seyahat planlaması, mekan önerileri ve tarihi bilgiler konusunda yardımcı olabilirim. Ne öğrenmek istersiniz?',
-      timestamp: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-      metadata: {},
-    }
-  ]);
+  const [messages, setMessages] = useState([createWelcomeMessage()]);
   const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [isVoiceActive, setIsVoiceActive] = useState(false);
-  const [isVoiceSupported, setIsVoiceSupported] = useState(true);
-  const [isAutoSpeakEnabled, setIsAutoSpeakEnabled] = useState(false);
-  const [isSpeechPlaying, setIsSpeechPlaying] = useState(false);
-  const [speakingMessageId, setSpeakingMessageId] = useState(null);
-  const [addToRouteModalVisible, setAddToRouteModalVisible] = useState(false);
-  const [selectedPlaceName, setSelectedPlaceName] = useState('');
-  const [itineraries, setItineraries] = useState([]);
-  const [selectedItinerary, setSelectedItinerary] = useState(null);
-  const [isAddingToRoute, setIsAddingToRoute] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState(sessionId);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSending, setIsSending] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+  const [confirmVisible, setConfirmVisible] = useState(false);
 
-  const handleStopSpeech = useCallback(async () => {
-    try {
-      if (ttsEngineRef.current) {
-        await ttsEngineRef.current.stop();
-      }
-    } catch (error) {
-      console.error('Error stopping speech:', error);
-    } finally {
-      setIsSpeechPlaying(false);
-      setSpeakingMessageId(null);
-    }
-  }, []);
-
-  const speakText = useCallback(async (text, messageId = null) => {
-    if (!text || !ttsEngineRef.current) return;
-    try {
-      setIsSpeechPlaying(true);
-      setSpeakingMessageId(messageId);
-      await ttsEngineRef.current.speak(text);
-    } catch (error) {
-      console.error('Error speaking message:', error);
-    } finally {
-      setIsSpeechPlaying(false);
-      setSpeakingMessageId(null);
-    }
-  }, []);
-
-  // Initialize services
-  useEffect(() => {
-    chatManagerRef.current = ChatManager.getInstance();
-    ttsEngineRef.current = new TTSEngine();
-
-    // Configure browser speech recognition for web.
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const SpeechRecognitionClass =
-        window.SpeechRecognition || window.webkitSpeechRecognition;
-
-      if (SpeechRecognitionClass) {
-        const recognition = new SpeechRecognitionClass();
-        recognition.lang = 'tr-TR';
-        recognition.interimResults = false;
-        recognition.maxAlternatives = 1;
-
-        recognition.onstart = () => {
-          setIsVoiceActive(true);
-        };
-
-        recognition.onresult = (event) => {
-          const transcript = event?.results?.[0]?.[0]?.transcript?.trim();
-          if (!transcript) return;
-
-          setInputText(transcript);
-          handleSendMessage(transcript);
-        };
-
-        recognition.onerror = async (event) => {
-          console.error('Voice recognition error:', event?.error || event);
-          setIsVoiceActive(false);
-          await chatManagerRef.current?.stopVoiceSession();
-        };
-
-        recognition.onend = async () => {
-          setIsVoiceActive(false);
-          await chatManagerRef.current?.stopVoiceSession();
-        };
-
-        speechRecognitionRef.current = recognition;
-        setIsVoiceSupported(true);
-      } else {
-        setIsVoiceSupported(false);
-      }
-    }
-
-    const bootstrapSession = async () => {
-      // Priority: explicit prop session -> last active session -> new session.
-      if (sessionId) {
-        await loadSession(sessionId);
-        return;
-      }
-
-      const restoredSession = await chatManagerRef.current.restoreLastSession();
-      if (restoredSession?.sessionId) {
-        await loadSession(restoredSession.sessionId);
-        return;
-      }
-
-      await initializeNewSession();
-    };
-
-    bootstrapSession();
-
-    return () => {
-      // Cleanup on unmount
-      if (speechRecognitionRef.current && Platform.OS === 'web') {
-        try {
-          speechRecognitionRef.current.onresult = null;
-          speechRecognitionRef.current.onerror = null;
-          speechRecognitionRef.current.onend = null;
-          speechRecognitionRef.current.stop();
-        } catch (error) {
-          console.error('Error cleaning up speech recognition:', error);
-        }
-      }
-      if (ttsEngineRef.current) {
-        ttsEngineRef.current.cleanup();
-      }
-      setIsSpeechPlaying(false);
-    };
-  }, []);
-
-  // Stop ongoing speech/recognition when screen loses focus (e.g., tab switch).
-  useFocusEffect(
-    useCallback(() => {
-      return () => {
-        handleStopSpeech();
-        if (speechRecognitionRef.current && Platform.OS === 'web') {
-          try {
-            speechRecognitionRef.current.stop();
-          } catch (error) {
-            console.error('Error stopping speech recognition on blur:', error);
-          }
-        }
-        setIsVoiceActive(false);
-      };
-    }, [handleStopSpeech])
+  const shellStyle = useMemo(
+    () => [
+      styles.shell,
+      width >= 860 && styles.shellWide,
+    ],
+    [width]
   );
 
-  /**
-   * Initialize a new chat session
-   */
-  const initializeNewSession = async () => {
-    try {
-      setIsLoading(true);
-      const backendSession = await chatService.createSession('AI Chat Session');
-      await chatManagerRef.current.setActiveSession(
-        backendSession.id,
-        backendSession.context_data || {}
-      );
-      setCurrentSessionId(backendSession.id);
-      // Save initial messages to local storage
-      await chatManagerRef.current.saveHistory(messages);
-    } catch (error) {
-      console.error('Error initializing session:', error);
-    } finally {
-      setIsLoading(false);
+  const visibleMessages = messages.length ? messages : [createWelcomeMessage()];
+  const canClear = visibleMessages.length > 1 && !isSending && !isClearing;
+
+  const handleBackToFeed = useCallback(() => {
+    if (navigation?.navigate) {
+      navigation.navigate('Social');
     }
-  };
+  }, [navigation]);
 
-  /**
-   * Load an existing chat session
-   */
-  const loadSession = async (id) => {
+  const persistHistory = useCallback(async (nextMessages) => {
     try {
-      setIsLoading(true);
-      const sessionData = await chatService.getSession(id);
-      
-      // Load messages from session
-      const formattedMessages = sessionData.messages.map(msg => ({
-        id: msg.id,
-        type: msg.sender,
-        messageType: msg.message_type,
-        content: msg.content,
-        timestamp: new Date(msg.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-        metadata: msg.metadata || {},
-        intent: msg.intent,
-        confidence: msg.confidence,
-      }));
-
-      setMessages(formattedMessages);
-      setCurrentSessionId(id);
-      await chatManagerRef.current.setActiveSession(id, sessionData.context_data || {});
+      await chatManagerRef.current?.saveHistory(nextMessages);
     } catch (error) {
-      console.error('Error loading session:', error);
-      await initializeNewSession();
-    } finally {
-      setIsLoading(false);
+      console.error('Failed to persist chat history:', error);
     }
-  };
+  }, []);
 
-  /**
-   * Handle sending a message
-   */
-  const handleSendMessage = async (text) => {
-    if (!text.trim() || isTyping || !currentSessionId) return;
+  const initializeNewSession = useCallback(async () => {
+    const welcome = createWelcomeMessage();
+    const backendSession = await chatService.createSession('Excursa Assistant');
+    await chatManagerRef.current?.setActiveSession(
+      backendSession.id,
+      backendSession.context_data || {}
+    );
+    setCurrentSessionId(backendSession.id);
+    setMessages([welcome]);
+    await persistHistory([welcome]);
+  }, [persistHistory]);
 
-    // Create user message object
+  const loadSession = useCallback(async (id) => {
+    const sessionData = await chatService.getSession(id);
+    const formatted = (sessionData.messages || []).map(normalizeMessage);
+    const nextMessages = formatted.length ? formatted : [createWelcomeMessage()];
+    setMessages(nextMessages);
+    setCurrentSessionId(id);
+    await chatManagerRef.current?.setActiveSession(id, sessionData.context_data || {});
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const bootstrap = async () => {
+      chatManagerRef.current = ChatManager.getInstance();
+      try {
+        setIsLoading(true);
+        if (sessionId) {
+          await loadSession(sessionId);
+          return;
+        }
+
+        const restored = await chatManagerRef.current.restoreLastSession();
+        if (restored?.sessionId) {
+          await loadSession(restored.sessionId);
+          return;
+        }
+
+        await initializeNewSession();
+      } catch (error) {
+        console.error('Error bootstrapping chat:', error);
+        if (mounted) {
+          await initializeNewSession();
+        }
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    };
+
+    bootstrap();
+
+    return () => {
+      mounted = false;
+    };
+  }, [initializeNewSession, loadSession, sessionId]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    });
+  }, [messages, isSending]);
+
+  const handleSendMessage = useCallback(async (text = inputText) => {
+    const content = String(text || '').trim();
+    if (!content || isSending || !currentSessionId) return;
+
     const userMessage = {
-      id: Date.now().toString(),
+      id: `local-${Date.now()}`,
       type: 'user',
       messageType: 'text',
-      content: text.trim(),
+      content,
       timestamp: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
       metadata: {},
     };
 
-    // Add user message to state
-    let nextMessages = [];
-    setMessages(prev => {
-      nextMessages = [...prev, userMessage];
-      return nextMessages;
-    });
+    const optimisticMessages = [...visibleMessages, userMessage];
+    setMessages(optimisticMessages);
     setInputText('');
-    setIsTyping(true);
+    setIsSending(true);
 
     try {
-      // Send message to backend
-      const response = await chatService.sendMessage(
-        currentSessionId,
-        userMessage
-      );
-
-      // Add bot response to state
-      if (response.bot_message) {
-        const botMessage = {
-          id: response.bot_message.id,
-          type: 'bot',
-          messageType: response.bot_message.message_type,
-          content: response.bot_message.content,
-          timestamp: new Date(response.bot_message.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-          metadata: response.bot_message.metadata || {},
-          intent: response.bot_message.intent,
-          confidence: response.bot_message.confidence,
-        };
-
-        setMessages(prev => {
-          nextMessages = [...prev, botMessage];
-          return nextMessages;
-        });
-
-        // Speak response only when auto-speak is enabled.
-        if (isAutoSpeakEnabled && botMessage.content) {
-          await speakText(botMessage.content, botMessage.id);
-        }
-      }
-
-      // Save conversation history
-      await chatManagerRef.current.saveHistory(nextMessages);
-    } catch (error) {
-      console.error('Error sending message:', error);
-      // Show error message in chat
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        type: 'bot',
-        messageType: 'text',
-        content: 'Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin.',
-        timestamp: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-        metadata: {},
-      }]);
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
-  /**
-   * Handle voice input
-   */
-  const handleStartVoiceSession = async () => {
-    try {
-      if (!isVoiceSupported) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now().toString(),
+      const response = await chatService.sendMessage(currentSessionId, userMessage);
+      const botMessage = response?.bot_message
+        ? normalizeMessage(response.bot_message)
+        : {
+            id: `bot-${Date.now()}`,
             type: 'bot',
             messageType: 'text',
-            content: 'Bu tarayıcı sesli girişi desteklemiyor.',
+            content: 'Cevap olusturuldu ama mesaj formati okunamadi. Lutfen tekrar dener misin?',
             timestamp: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
             metadata: {},
-          },
-        ]);
-        return;
-      }
-
-      if (isVoiceActive) {
-        if (Platform.OS === 'web' && speechRecognitionRef.current) {
-          speechRecognitionRef.current.stop();
-        }
-        await chatManagerRef.current.stopVoiceSession();
-        setIsVoiceActive(false);
-        return;
-      }
-
-      await chatManagerRef.current.startVoiceSession();
-
-      if (Platform.OS === 'web') {
-        if (!speechRecognitionRef.current) {
-          setIsVoiceActive(false);
-          await chatManagerRef.current.stopVoiceSession();
-          return;
-        }
-        speechRecognitionRef.current.start();
-        return;
-      }
-
-      // Native voice recognition not yet wired; keep explicit active indicator.
-      setIsVoiceActive(true);
+          };
+      const nextMessages = [...optimisticMessages, botMessage];
+      setMessages(nextMessages);
+      await persistHistory(nextMessages);
     } catch (error) {
-      console.error('Error starting voice session:', error);
-      setIsVoiceActive(false);
-    }
-  };
-
-  /**
-   * Handle quick reply press
-   */
-  const handleQuickReplyPress = (text) => {
-    handleSendMessage(text);
-  };
-
-  const handleSpeakMessage = async (messageId, text) => {
-    if (isSpeechPlaying && speakingMessageId === messageId) {
-      await handleStopSpeech();
-      return;
-    }
-
-    await speakText(text, messageId);
-  };
-
-  const openAddToRouteModal = async (placeName) => {
-    try {
-      setSelectedPlaceName(placeName);
-      setSelectedItinerary(null);
-      setAddToRouteModalVisible(true);
-
-      const itinerariesData = await locationService.fetchUserItineraries();
-      const editableItineraries = (itinerariesData.results || []).filter(
-        (itinerary) => itinerary.status === 'DRAFT' || itinerary.status === 'ACTIVE'
-      );
-      setItineraries(editableItineraries);
-    } catch (error) {
-      console.error('Error loading itineraries:', error);
-      Alert.alert('Hata', 'Rotalar yüklenemedi.');
-    }
-  };
-
-  const addPlaceToSelectedRoute = async () => {
-    if (!selectedPlaceName || !selectedItinerary) {
-      Alert.alert('Hata', 'Lütfen bir rota seçin.');
-      return;
-    }
-
-    try {
-      setIsAddingToRoute(true);
-      const searchResult = await locationService.searchPOIs(selectedPlaceName);
-      const poiResults = searchResult?.results || [];
-
-      if (poiResults.length === 0) {
-        Alert.alert('Bulunamadı', `"${selectedPlaceName}" için uygun bir yer bulunamadı.`);
-        return;
-      }
-
-      const normalizedTarget = normalizeKey(selectedPlaceName);
-      const bestPoi =
-        poiResults.find((poi) => normalizeKey(poi.name) === normalizedTarget) ||
-        poiResults[0];
-
-      const existingStops = selectedItinerary.total_stops ?? selectedItinerary.stops?.length ?? 0;
-      const nextOrder = existingStops;
-
-      await locationService.addPOIToItinerary(
-        selectedItinerary.id,
-        bestPoi.id,
-        nextOrder
-      );
-
-      Alert.alert('Başarılı', `${bestPoi.name} rotaya eklendi.`);
-      setAddToRouteModalVisible(false);
-      setSelectedItinerary(null);
-    } catch (error) {
-      console.error('Error adding place to route:', error);
-      Alert.alert('Hata', 'Yer rotaya eklenemedi.');
+      console.error('Error sending message:', error);
+      const errorMessage = {
+        id: `error-${Date.now()}`,
+        type: 'bot',
+        messageType: 'text',
+        content: 'Asistan servisine ulasilamadi. Biraz sonra tekrar deneyebilirsin.',
+        timestamp: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+        metadata: {},
+      };
+      const nextMessages = [...optimisticMessages, errorMessage];
+      setMessages(nextMessages);
+      await persistHistory(nextMessages);
     } finally {
-      setIsAddingToRoute(false);
+      setIsSending(false);
     }
-  };
+  }, [currentSessionId, inputText, isSending, persistHistory, visibleMessages]);
 
-  /**
-   * Render individual message
-   */
-  const renderMessageItem = ({ item }) => {
+  const clearChat = useCallback(async () => {
+    if (!currentSessionId || isClearing) return;
+
+    setConfirmVisible(false);
+    setIsClearing(true);
+    try {
+      await chatService.clearHistory(currentSessionId);
+      await chatManagerRef.current?.clearHistory();
+      const welcome = createWelcomeMessage();
+      setMessages([welcome]);
+      setInputText('');
+      await persistHistory([welcome]);
+    } catch (error) {
+      console.error('Error clearing chat:', error);
+      Alert.alert('Temizlenemedi', 'Sohbet temizlenirken bir hata olustu. Lutfen tekrar deneyin.');
+    } finally {
+      setIsClearing(false);
+    }
+  }, [currentSessionId, isClearing, persistHistory]);
+
+  const renderMessage = ({ item }) => {
+    const isUser = item.type === 'user';
     return (
-      <View
-        style={[
-          styles.messageContainer,
-          item.type === 'user' ? styles.userMessageContainer : styles.botMessageContainer,
-        ]}
-      >
-        {item.type === 'bot' && (
-          <View style={styles.botAvatar}>
-            <Text style={styles.botAvatarText}>🌍</Text>
+      <View style={[styles.messageRow, isUser ? styles.userRow : styles.botRow]}>
+        {!isUser && (
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>EX</Text>
           </View>
         )}
 
-        <View
-          style={[
-            styles.messageBubble,
-            item.type === 'user' ? styles.userBubble : styles.botBubble,
-          ]}
-        >
-          {renderMessageItem_Content(item)}
+        <View style={[styles.bubble, isUser ? styles.userBubble : styles.botBubble]}>
+          <Text style={[styles.messageText, isUser ? styles.userText : styles.botText]}>
+            {isUser ? item.content : formatBotText(item.content)}
+          </Text>
+          <Text style={[styles.messageTime, isUser ? styles.userTime : styles.botTime]}>
+            {item.timestamp}
+          </Text>
         </View>
       </View>
     );
   };
 
-  /**
-   * Render message content based on type
-   */
-  const renderMessageItem_Content = (item) => {
-    switch (item.messageType) {
-      case 'card':
-        return renderCardMessage(item);
-      case 'suggestion':
-        return renderSuggestionMessage(item);
-      default:
-        return (
-          <>
-            <Text
-              style={[
-                styles.messageText,
-                item.type === 'user' ? styles.userMessageText : styles.botMessageText,
-              ]}
-            >
-              {item.type === 'bot' ? formatBotText(item.content) : item.content}
-            </Text>
-            <View style={styles.messageMetaRow}>
-              <Text style={styles.messageTime}>{item.timestamp}</Text>
-              {item.type === 'bot' && (
-                <TouchableOpacity
-                  style={styles.speakButton}
-                  onPress={() => handleSpeakMessage(item.id, item.content)}
-                >
-                  <Text style={styles.speakButtonText}>
-                    {isSpeechPlaying && speakingMessageId === item.id ? '⏹' : '🔊'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            {item.type === 'bot' && (() => {
-              const places = extractSuggestedPlaceNames(item.content);
-              if (places.length === 0) return null;
-              return (
-                <View style={styles.placeActionsRow}>
-                  {places.map((place) => (
-                    <TouchableOpacity
-                      key={`${item.id}-${place}`}
-                      style={styles.addToRouteChip}
-                      onPress={() => openAddToRouteModal(place)}
-                    >
-                      <Text style={styles.addToRouteChipText}>+ {place} • Rotaya Ekle</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              );
-            })()}
-          </>
-        );
-    }
-  };
-
-  /**
-   * Render card-type message (POI suggestion, etc.)
-   */
-  const renderCardMessage = (item) => {
-    const card = item.metadata;
+  const renderTyping = () => {
+    if (!isSending) return null;
     return (
-      <View>
-        {card.title && <Text style={styles.cardTitle}>{card.title}</Text>}
-        {card.description && <Text style={styles.cardDescription}>{card.description}</Text>}
-        {card.rating && (
-          <Text style={styles.cardRating}>⭐ {card.rating.toFixed(1)}</Text>
-        )}
-        {card.actions && (
-          <View style={styles.cardActions}>
-            {card.actions.map(action => (
-              <TouchableOpacity
-                key={action.id}
-                style={styles.cardActionButton}
-                onPress={() => {
-                  if (action.type === 'navigate_poi' && onNavigateToPOI) {
-                    onNavigateToPOI(action.poiId);
-                  } else if (action.type === 'add_itinerary' && onNavigateToItinerary) {
-                    onNavigateToItinerary(action.poiId);
-                  }
-                }}
-              >
-                <Text style={styles.cardActionText}>{action.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-        <View style={styles.messageMetaRow}>
-          <Text style={styles.messageTime}>{item.timestamp}</Text>
-          {item.type === 'bot' && (
-            <TouchableOpacity
-              style={styles.speakButton}
-              onPress={() => handleSpeakMessage(item.id, item.content)}
-            >
-              <Text style={styles.speakButtonText}>
-                {isSpeechPlaying && speakingMessageId === item.id ? '⏹' : '🔊'}
-              </Text>
-            </TouchableOpacity>
-          )}
+      <View style={[styles.messageRow, styles.botRow]}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>EX</Text>
         </View>
-      </View>
-    );
-  };
-
-  /**
-   * Render suggestion-type message (quick replies)
-   */
-  const renderSuggestionMessage = (item) => {
-    const suggestions = item.metadata.suggestions || [];
-    return (
-      <View>
-        <Text
-          style={[
-            styles.messageText,
-            item.type === 'user' ? styles.userMessageText : styles.botMessageText,
-          ]}
-        >
-          {item.type === 'bot' ? formatBotText(item.content) : item.content}
-        </Text>
-        <View style={styles.suggestionsContainer}>
-          {suggestions.map((suggestion, index) => (
-            <TouchableOpacity
-              key={index}
-              style={styles.suggestionChip}
-              onPress={() => handleSendMessage(suggestion)}
-            >
-              <Text style={styles.suggestionText}>{suggestion}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <View style={styles.messageMetaRow}>
-          <Text style={styles.messageTime}>{item.timestamp}</Text>
-          {item.type === 'bot' && (
-            <TouchableOpacity
-              style={styles.speakButton}
-              onPress={() => handleSpeakMessage(item.id, item.content)}
-            >
-              <Text style={styles.speakButtonText}>
-                {isSpeechPlaying && speakingMessageId === item.id ? '⏹' : '🔊'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-    );
-  };
-
-  /**
-   * Render typing indicator
-   */
-  const renderTypingIndicator = () => {
-    if (!isTyping) return null;
-
-    return (
-      <View style={styles.typingContainer}>
-        <View style={styles.botAvatar}>
-          <Text style={styles.botAvatarText}>🌍</Text>
-        </View>
-        <View style={styles.typingBubble}>
-          <Text style={styles.typingDot}>●</Text>
-          <Text style={styles.typingDot}>●</Text>
-          <Text style={styles.typingDot}>●</Text>
+        <View style={[styles.bubble, styles.typingBubble]}>
+          <View style={styles.dot} />
+          <View style={[styles.dot, styles.dotMiddle]} />
+          <View style={styles.dot} />
         </View>
       </View>
     );
@@ -745,9 +286,9 @@ export default function ChatbotScreen({ sessionId, onNavigateToPOI, onNavigateTo
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1a1a2e" />
-        <Text style={styles.loadingText}>Session yükleniyor...</Text>
+      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
+        <ActivityIndicator size="large" color={COLORS.brand} />
+        <Text style={styles.loadingText}>Seyahat asistanin hazirlaniyor...</Text>
       </View>
     );
   }
@@ -758,157 +299,129 @@ export default function ChatbotScreen({ sessionId, onNavigateToPOI, onNavigateTo
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
     >
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top }]}>
-        <View style={styles.headerLeft}>
-          <View style={styles.headerAvatar}>
-            <Text style={styles.headerAvatarText}>🌍</Text>
+      <View style={shellStyle}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
+          <View style={styles.headerIdentity}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={handleBackToFeed}
+              activeOpacity={0.78}
+              accessibilityRole="button"
+              accessibilityLabel="Akisa don"
+            >
+              <Text style={styles.backButtonText}>‹</Text>
+            </TouchableOpacity>
+            <View style={styles.headerIcon}>
+              <Text style={styles.headerIconText}>EX</Text>
+            </View>
+            <View style={styles.headerCopy}>
+              <Text style={styles.headerTitle}>Excursa Asistan</Text>
+              <Text style={styles.headerSubtitle}>Rota, yer ve gezi plani rehberi</Text>
+            </View>
           </View>
-          <View>
-            <Text style={styles.headerTitle}>EXCURSA Asistan</Text>
-            <Text style={styles.headerSubtitle}>AI Seyahat Rehberi</Text>
+
+          <TouchableOpacity
+            style={[styles.clearButton, !canClear && styles.clearButtonDisabled]}
+            onPress={() => setConfirmVisible(true)}
+            disabled={!canClear}
+            activeOpacity={0.78}
+          >
+            <Text style={[styles.clearButtonText, !canClear && styles.clearButtonTextDisabled]}>
+              {isClearing ? 'Temizleniyor' : 'Temizle'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <FlatList
+          ref={listRef}
+          data={visibleMessages}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={renderMessage}
+          contentContainerStyle={styles.messagesList}
+          showsVerticalScrollIndicator={false}
+          ListFooterComponent={renderTyping}
+        />
+
+        {visibleMessages.length <= 1 && (
+          <View style={styles.quickRepliesContainer}>
+            <FlatList
+              data={QUICK_REPLIES}
+              keyExtractor={(item) => item}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.quickReply}
+                  onPress={() => handleSendMessage(item)}
+                  disabled={isSending}
+                  activeOpacity={0.78}
+                >
+                  <Text style={styles.quickReplyText}>{item}</Text>
+                </TouchableOpacity>
+              )}
+            />
           </View>
-        </View>
-        <View style={styles.onlineBadge}>
-          <TouchableOpacity
-            style={[
-              styles.ttsToggleButton,
-              isAutoSpeakEnabled && styles.ttsToggleButtonActive,
-            ]}
-            onPress={() => setIsAutoSpeakEnabled((prev) => !prev)}
-          >
-            <Text style={styles.ttsToggleText}>{isAutoSpeakEnabled ? '🔊 Otomatik' : '🔇 Otomatik'}</Text>
-          </TouchableOpacity>
-          <View style={styles.onlineDot} />
-          <Text style={styles.onlineText}>Çevrimiçi</Text>
-        </View>
-      </View>
+        )}
 
-      {/* Messages List */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMessageItem}
-        contentContainerStyle={styles.messagesList}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-        showsVerticalScrollIndicator={false}
-        ListFooterComponent={renderTypingIndicator()}
-      />
-
-      {/* Quick Replies */}
-      {messages.length < 3 && (
-        <View style={styles.quickRepliesContainer}>
-          <FlatList
-            data={QUICK_REPLIES}
-            keyExtractor={(item) => item}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.quickReply}
-                onPress={() => handleQuickReplyPress(item)}
-              >
-                <Text style={styles.quickReplyText}>{item}</Text>
-              </TouchableOpacity>
-            )}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-          />
-        </View>
-      )}
-
-      {/* Input Area */}
-      <View style={[styles.inputContainer, { paddingBottom: insets.bottom }]}>
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={styles.input}
-            placeholder="Bir şey sorun..."
-            placeholderTextColor="#999"
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-            maxLength={1000}
-            editable={!isTyping}
-          />
-          <TouchableOpacity
-            style={[
-              styles.voiceButton,
-              isVoiceActive && styles.voiceButtonActive,
-              !isVoiceSupported && styles.voiceButtonDisabled,
-            ]}
-            onPress={handleStartVoiceSession}
-            disabled={isTyping}
-          >
-            <Text style={styles.voiceButtonIcon}>{isVoiceActive ? '⏹' : '🎙️'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.sendButton,
-              (!inputText.trim() || isTyping) && styles.sendButtonDisabled,
-            ]}
-            onPress={() => handleSendMessage(inputText)}
-            disabled={!inputText.trim() || isTyping}
-          >
-            <Text style={styles.sendButtonText}>➤</Text>
-          </TouchableOpacity>
+        <View style={[styles.inputArea, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <View style={styles.inputShell}>
+            <TextInput
+              style={styles.input}
+              value={inputText}
+              onChangeText={setInputText}
+              multiline
+              maxLength={1000}
+              editable={!isSending}
+            />
+            <TouchableOpacity
+              style={[
+                styles.sendButton,
+                (!inputText.trim() || isSending) && styles.sendButtonDisabled,
+              ]}
+              onPress={() => handleSendMessage()}
+              disabled={!inputText.trim() || isSending}
+              activeOpacity={0.82}
+            >
+              {isSending ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.sendButtonText}>Send</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
       <Modal
-        visible={addToRouteModalVisible}
+        visible={confirmVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setAddToRouteModalVisible(false)}
+        onRequestClose={() => setConfirmVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Rotaya Ekle</Text>
-            <Text style={styles.modalSubtitle}>Yer: {selectedPlaceName}</Text>
-
-            {itineraries.length === 0 ? (
-              <Text style={styles.emptyRouteText}>Eklenebilir rota bulunamadı.</Text>
-            ) : (
-              <View style={styles.itineraryList}>
-                {itineraries.map((itinerary) => (
-                  <TouchableOpacity
-                    key={itinerary.id}
-                    style={[
-                      styles.itineraryOption,
-                      selectedItinerary?.id === itinerary.id && styles.itineraryOptionSelected,
-                    ]}
-                    onPress={() => setSelectedItinerary(itinerary)}
-                  >
-                    <Text style={styles.itineraryOptionTitle}>{itinerary.title}</Text>
-                    <Text style={styles.itineraryOptionMeta}>
-                      {itinerary.total_stops ?? itinerary.stops?.length ?? 0} durak
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            <View style={styles.modalActions}>
+        <Pressable style={styles.modalOverlay} onPress={() => setConfirmVisible(false)}>
+          <Pressable style={styles.confirmCard}>
+            <Text style={styles.confirmTitle}>Sohbeti temizle?</Text>
+            <Text style={styles.confirmText}>
+              Bu ekrandaki mesajlar ve backend sohbet gecmisi temizlenecek. Bu islem geri alinamaz.
+            </Text>
+            <View style={styles.confirmActions}>
               <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => setAddToRouteModalVisible(false)}
-                disabled={isAddingToRoute}
+                style={styles.cancelAction}
+                onPress={() => setConfirmVisible(false)}
+                activeOpacity={0.78}
               >
-                <Text style={styles.modalCancelText}>Vazgeç</Text>
+                <Text style={styles.cancelActionText}>Vazgec</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[
-                  styles.modalConfirmButton,
-                  (!selectedItinerary || isAddingToRoute) && styles.modalConfirmButtonDisabled,
-                ]}
-                onPress={addPlaceToSelectedRoute}
-                disabled={!selectedItinerary || isAddingToRoute}
+                style={styles.destructiveAction}
+                onPress={clearChat}
+                activeOpacity={0.78}
               >
-                <Text style={styles.modalConfirmText}>
-                  {isAddingToRoute ? 'Ekleniyor...' : 'Ekle'}
-                </Text>
+                <Text style={styles.destructiveActionText}>Temizle</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -917,429 +430,342 @@ export default function ChatbotScreen({ sessionId, onNavigateToPOI, onNavigateTo
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.bg,
+  },
+  shell: {
+    flex: 1,
+    width: '100%',
+    alignSelf: 'center',
+    backgroundColor: COLORS.bg,
+  },
+  shellWide: {
+    maxWidth: 820,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: COLORS.line,
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    backgroundColor: COLORS.bg,
   },
   loadingText: {
     marginTop: 12,
+    color: COLORS.muted,
     fontSize: 14,
-    color: '#666',
+    fontWeight: '700',
   },
-
-  // Header Styles
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    backgroundColor: '#fff',
+    paddingHorizontal: 18,
+    paddingBottom: 14,
+    backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  headerLeft: {
+    borderColor: COLORS.line,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    flex: 1,
+    justifyContent: 'space-between',
+    gap: 14,
   },
-  headerAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#1a1a2e',
-    justifyContent: 'center',
+  headerIdentity: {
+    flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
   },
-  headerAvatarText: {
-    fontSize: 22,
+  backButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 15,
+    backgroundColor: COLORS.surfaceStrong,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  backButtonText: {
+    color: COLORS.ink,
+    fontSize: 30,
+    lineHeight: 31,
+    fontWeight: '800',
+    marginTop: -2,
+  },
+  headerIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 18,
+    backgroundColor: COLORS.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: COLORS.brand,
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+  },
+  headerIconText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  headerCopy: {
+    marginLeft: 12,
+    flex: 1,
+    minWidth: 0,
   },
   headerTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
+    color: COLORS.ink,
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: -0.2,
   },
   headerSubtitle: {
+    marginTop: 3,
+    color: COLORS.muted,
     fontSize: 12,
-    color: '#888',
-    marginTop: 2,
-  },
-  onlineBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  ttsToggleButton: {
-    backgroundColor: '#f1f3f5',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginRight: 8,
-  },
-  ttsToggleButtonActive: {
-    backgroundColor: '#e8f4ff',
-    borderWidth: 1,
-    borderColor: '#1a73e8',
-  },
-  ttsToggleText: {
-    fontSize: 11,
-    color: '#1a1a2e',
     fontWeight: '600',
   },
-  onlineDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#27ae60',
+  clearButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    backgroundColor: COLORS.surfaceStrong,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
   },
-  onlineText: {
+  clearButtonDisabled: {
+    opacity: 0.45,
+  },
+  clearButtonText: {
+    color: COLORS.danger,
     fontSize: 12,
-    color: '#27ae60',
+    fontWeight: '900',
   },
-
-  // Messages List
+  clearButtonTextDisabled: {
+    color: COLORS.muted,
+  },
   messagesList: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 18,
   },
-  messageContainer: {
+  messageRow: {
+    width: '100%',
     flexDirection: 'row',
-    marginBottom: 12,
-    alignItems: 'flex-end',
+    marginBottom: 14,
   },
-  userMessageContainer: {
+  userRow: {
     justifyContent: 'flex-end',
   },
-  botMessageContainer: {
+  botRow: {
     justifyContent: 'flex-start',
   },
-  botAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#1a1a2e',
-    justifyContent: 'center',
+  avatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 14,
+    backgroundColor: COLORS.brand,
     alignItems: 'center',
-    marginRight: 8,
+    justifyContent: 'center',
+    marginRight: 9,
+    marginTop: 2,
   },
-  botAvatarText: {
-    fontSize: 16,
+  avatarText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
   },
-  messageBubble: {
-    maxWidth: '75%',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+  bubble: {
+    maxWidth: '82%',
+    borderRadius: 22,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
   },
   userBubble: {
-    backgroundColor: '#1a1a2e',
-    borderBottomRightRadius: 4,
+    backgroundColor: COLORS.brand,
+    borderBottomRightRadius: 7,
   },
   botBubble: {
-    backgroundColor: '#fff',
-    borderBottomLeftRadius: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    backgroundColor: COLORS.surfaceStrong,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    borderBottomLeftRadius: 7,
+    shadowColor: '#4c3a28',
+    shadowOpacity: 0.07,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 2,
   },
   messageText: {
     fontSize: 15,
-    lineHeight: 22,
+    lineHeight: 23,
   },
-  userMessageText: {
+  userText: {
     color: '#fff',
+    fontWeight: '600',
   },
-  botMessageText: {
-    color: '#333',
+  botText: {
+    color: COLORS.ink,
+    fontWeight: '600',
   },
   messageTime: {
-    fontSize: 11,
-    color: '#aaa',
+    marginTop: 7,
+    fontSize: 10,
+    fontWeight: '700',
     alignSelf: 'flex-end',
   },
-  messageMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-    justifyContent: 'flex-end',
+  userTime: {
+    color: 'rgba(255,255,255,0.68)',
   },
-  speakButton: {
-    backgroundColor: '#eef4ff',
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  speakButtonText: {
-    fontSize: 11,
-    color: '#1a1a2e',
-  },
-  placeActionsRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  addToRouteChip: {
-    backgroundColor: '#edf7ed',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2e7d32',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  addToRouteChipText: {
-    fontSize: 11,
-    color: '#1b5e20',
-    fontWeight: '600',
-  },
-
-  // Card Message Styles
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a2e',
-    marginBottom: 4,
-  },
-  cardDescription: {
-    fontSize: 13,
-    color: '#555',
-    marginBottom: 8,
-    lineHeight: 19,
-  },
-  cardRating: {
-    fontSize: 13,
-    color: '#f39c12',
-    marginBottom: 8,
-  },
-  cardActions: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-    flexWrap: 'wrap',
-  },
-  cardActionButton: {
-    backgroundColor: '#1a1a2e',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  cardActionText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-
-  // Suggestion Message Styles
-  suggestionsContainer: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-    flexWrap: 'wrap',
-  },
-  suggestionChip: {
-    backgroundColor: '#e8e8ff',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#1a1a2e',
-  },
-  suggestionText: {
-    fontSize: 12,
-    color: '#1a1a2e',
-    fontWeight: '500',
-  },
-
-  // Typing Indicator
-  typingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 12,
+  botTime: {
+    color: COLORS.muted,
   },
   typingBubble: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderBottomLeftRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    minWidth: 72,
     flexDirection: 'row',
-    gap: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
   },
-  typingDot: {
-    fontSize: 12,
-    color: '#999',
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: COLORS.accent,
+    opacity: 0.55,
   },
-
-  // Quick Replies
+  dotMiddle: {
+    opacity: 1,
+  },
   quickRepliesContainer: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    borderColor: COLORS.line,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   quickReply: {
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginRight: 8,
+    marginRight: 9,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: COLORS.brandSoft,
+    borderWidth: 1,
+    borderColor: '#ded7ff',
   },
   quickReplyText: {
+    color: COLORS.ink,
     fontSize: 12,
-    color: '#1a1a2e',
-    fontWeight: '500',
+    fontWeight: '800',
   },
-
-  // Input Area
-  inputContainer: {
-    backgroundColor: '#fff',
+  inputArea: {
+    backgroundColor: COLORS.surface,
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    paddingHorizontal: 12,
-    paddingTop: 8,
+    borderColor: COLORS.line,
+    paddingHorizontal: 14,
+    paddingTop: 10,
   },
-  inputWrapper: {
+  inputShell: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
+    gap: 10,
+    backgroundColor: COLORS.surfaceStrong,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    paddingLeft: 15,
+    paddingRight: 8,
+    paddingVertical: 8,
+    shadowColor: '#4c3a28',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 2,
   },
   input: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 14,
-    maxHeight: 100,
-    color: '#1a1a2e',
-  },
-  voiceButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#e3f2fd',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  voiceButtonActive: {
-    backgroundColor: '#ffe8e8',
-    borderWidth: 1,
-    borderColor: '#d32f2f',
-  },
-  voiceButtonDisabled: {
-    opacity: 0.4,
-  },
-  voiceButtonIcon: {
-    fontSize: 18,
+    minHeight: 38,
+    maxHeight: 112,
+    color: COLORS.ink,
+    fontSize: 15,
+    lineHeight: 21,
+    paddingVertical: Platform.OS === 'ios' ? 9 : 7,
+    fontWeight: '600',
   },
   sendButton: {
-    width: 36,
-    height: 36,
+    minWidth: 72,
+    height: 42,
     borderRadius: 18,
-    backgroundColor: '#1a1a2e',
-    justifyContent: 'center',
+    backgroundColor: COLORS.brand,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
   },
   sendButtonDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#c9c4bb',
   },
   sendButtonText: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
+    fontSize: 13,
+    fontWeight: '900',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(20, 17, 14, 0.42)',
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
+    padding: 22,
   },
-  modalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1a1a2e',
-    marginBottom: 4,
-  },
-  modalSubtitle: {
-    fontSize: 13,
-    color: '#555',
-    marginBottom: 12,
-  },
-  emptyRouteText: {
-    color: '#666',
-    marginBottom: 12,
-  },
-  itineraryList: {
-    maxHeight: 220,
-    marginBottom: 12,
-  },
-  itineraryOption: {
+  confirmCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 24,
+    backgroundColor: COLORS.surfaceStrong,
+    padding: 20,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 8,
+    borderColor: COLORS.line,
   },
-  itineraryOptionSelected: {
-    borderColor: '#1a73e8',
-    backgroundColor: '#eef4ff',
+  confirmTitle: {
+    color: COLORS.ink,
+    fontSize: 19,
+    fontWeight: '900',
   },
-  itineraryOptionTitle: {
+  confirmText: {
+    marginTop: 8,
+    color: COLORS.muted,
     fontSize: 14,
+    lineHeight: 21,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
-  itineraryOptionMeta: {
-    marginTop: 2,
-    fontSize: 12,
-    color: '#666',
-  },
-  modalActions: {
+  confirmActions: {
+    marginTop: 18,
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 10,
   },
-  modalCancelButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#f1f1f1',
+  cancelAction: {
+    borderRadius: 14,
+    backgroundColor: COLORS.bg,
+    paddingHorizontal: 15,
+    paddingVertical: 11,
   },
-  modalCancelText: {
-    color: '#333',
-    fontWeight: '600',
+  cancelActionText: {
+    color: COLORS.ink,
+    fontSize: 13,
+    fontWeight: '900',
   },
-  modalConfirmButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#1a73e8',
+  destructiveAction: {
+    borderRadius: 14,
+    backgroundColor: COLORS.danger,
+    paddingHorizontal: 15,
+    paddingVertical: 11,
   },
-  modalConfirmButtonDisabled: {
-    backgroundColor: '#9bbce8',
-  },
-  modalConfirmText: {
+  destructiveActionText: {
     color: '#fff',
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '900',
   },
 });

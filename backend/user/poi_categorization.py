@@ -1,16 +1,19 @@
 import re
+import unicodedata
 
 
 # Types that are usually meaningful as itinerary/sightseeing POIs.
 MEANINGFUL_POI_ALLOW_TYPES = {
     "tourist_attraction", "museum", "art_gallery", "art_museum", "art_studio",
-    "historical_landmark", "historical_place", "monument", "castle", "cultural_landmark",
+    "historical_landmark", "historical_place", "historic", "monument", "memorial",
+    "castle", "archaeological_site", "ruins", "fort", "cultural_landmark",
     "performing_arts_theater", "cultural_center", "opera_house", "auditorium",
     "park", "city_park", "national_park", "state_park", "botanical_garden", "garden",
-    "hiking_area", "beach", "lake", "river", "woods", "nature_preserve", "scenic_spot",
-    "zoo", "aquarium", "observation_deck", "plaza", "visitor_center",
-    "restaurant", "cafe", "bakery", "coffee_shop", "ice_cream_shop", "tea_house",
-    "market", "farmers_market", "flea_market", "shopping_mall", "book_store", "clothing_store",
+    "hiking_area", "beach", "lake", "river", "woods", "nature_preserve",
+    "nature_reserve", "natural", "peak", "spring", "water", "cliff",
+    "cave_entrance", "scenic_spot", "viewpoint", "zoo", "aquarium",
+    "observation_deck", "plaza", "visitor_center",
+    "bazaar",
     "movie_theater", "amusement_park", "night_club", "stadium", "concert_hall",
     "live_music_venue", "community_center", "church", "mosque", "synagogue", "buddhist_temple",
     "hindu_temple", "tourist_information_center",
@@ -18,7 +21,8 @@ MEANINGFUL_POI_ALLOW_TYPES = {
 
 # Types that should almost never become destination POIs in a travel itinerary.
 MEANINGFUL_POI_BLOCK_TYPES = {
-    "atm", "bank", "accounting", "hospital", "general_hospital", "pharmacy", "drugstore",
+    "atm", "bank", "finance", "accounting", "insurance_agency", "hospital",
+    "general_hospital", "pharmacy", "drugstore",
     "doctor", "dentist", "physiotherapist", "medical_center", "medical_clinic", "medical_lab",
     "parking", "parking_garage", "parking_lot", "rest_stop",
     "airport", "airstrip", "bus_station", "bus_stop", "train_station", "train_ticket_office",
@@ -33,6 +37,13 @@ MEANINGFUL_POI_BLOCK_TYPES = {
     "city_hall", "courthouse", "embassy", "fire_station", "police", "post_office",
     "corporate_office", "business_center", "coworking_space", "supplier", "manufacturer",
     "service", "storage", "moving_company", "roofing_contractor", "employment_agency",
+    "lawyer", "real_estate_agency", "car_repair", "car_dealer", "car_rental",
+    "gas_station", "locksmith", "electrician", "plumber", "hardware_store",
+    "restaurant", "cafe", "bakery", "coffee_shop", "ice_cream_shop", "tea_house",
+    "food", "fast_food", "meal_takeaway", "meal_delivery", "food_court",
+    "market", "farmers_market", "flea_market", "shopping_mall", "store",
+    "department_store", "clothing_store", "shoe_store", "electronics_store",
+    "supermarket", "convenience_store", "book_store", "gift_shop",
 }
 
 # Generic types that should be ignored when deciding the final category.
@@ -44,8 +55,9 @@ GENERIC_GOOGLE_TYPES = {
 POI_CATEGORY_RULES = {
     "HISTORICAL": {
         "strong": {
-            "historical_landmark", "historical_place", "monument", "museum", "history_museum",
-            "castle", "cultural_landmark", "art_museum",
+            "historical_landmark", "historical_place", "historic", "monument",
+            "memorial", "archaeological_site", "ruins", "fort", "museum",
+            "history_museum", "castle", "cultural_landmark", "art_museum",
         },
         "weak": {
             "tourist_attraction", "church", "mosque", "synagogue", "buddhist_temple",
@@ -63,15 +75,13 @@ POI_CATEGORY_RULES = {
         "strong": {
             "park", "city_park", "national_park", "state_park", "botanical_garden",
             "hiking_area", "beach", "lake", "river", "woods", "nature_preserve",
+            "nature_reserve", "natural", "peak", "spring", "water", "cliff", "cave_entrance",
         },
-        "weak": {"garden", "scenic_spot", "zoo", "aquarium", "observation_deck"},
+        "weak": {"garden", "scenic_spot", "viewpoint", "zoo", "aquarium", "observation_deck"},
     },
     "FOOD": {
-        "strong": {"restaurant", "cafe", "bakery", "coffee_shop"},
-        "weak": {
-            "bar", "ice_cream_shop", "tea_house", "meal_takeaway", "meal_delivery",
-            "food_court", "market", "farmers_market",
-        },
+        "strong": set(),
+        "weak": set(),
     },
     "ENTERTAINMENT": {
         "strong": {
@@ -81,8 +91,8 @@ POI_CATEGORY_RULES = {
         "weak": {"tourist_attraction", "plaza", "event_venue", "community_center"},
     },
     "SHOPPING": {
-        "strong": {"shopping_mall", "market", "book_store", "clothing_store", "farmers_market", "flea_market"},
-        "weak": {"gift_shop", "department_store", "store"},
+        "strong": {"bazaar"},
+        "weak": set(),
     },
     "WELLNESS": {
         "strong": {"spa", "wellness_center", "yoga_studio", "massage_spa", "sauna"},
@@ -99,13 +109,14 @@ POI_CATEGORY_RULES = {
 }
 
 PRIMARY_TYPE_PRIORITY = [
-    "historical_landmark", "monument", "museum", "history_museum", "castle", "cultural_landmark",
+    "historical_landmark", "historical_place", "historic", "monument", "memorial",
+    "archaeological_site", "ruins", "museum", "history_museum", "castle", "cultural_landmark",
     "art_gallery", "art_museum", "performing_arts_theater", "cultural_center", "opera_house",
     "national_park", "state_park", "botanical_garden", "park", "city_park", "hiking_area",
-    "beach", "lake", "nature_preserve", "woods", "garden", "scenic_spot",
-    "restaurant", "cafe", "bakery", "coffee_shop", "bar", "ice_cream_shop",
-    "movie_theater", "amusement_park", "night_club", "stadium", "shopping_mall", "market",
-    "book_store", "clothing_store", "farmers_market", "flea_market",
+    "beach", "lake", "nature_preserve", "nature_reserve", "woods", "garden",
+    "scenic_spot", "viewpoint", "peak", "spring", "water", "cliff", "cave_entrance",
+    "movie_theater", "amusement_park", "night_club", "stadium", "market",
+    "farmers_market", "flea_market", "bazaar",
     "tourist_attraction", "plaza", "visitor_center", "church", "mosque", "synagogue",
 ]
 
@@ -114,12 +125,44 @@ def normalize_google_types(types) -> list[str]:
     normalized = []
     seen = set()
     for raw in types or []:
-        value = re.sub(r"\s+", "_", str(raw or "").strip().lower())
+        value = str(raw or "").strip().lower()
+        value = ''.join(
+            ch for ch in unicodedata.normalize("NFKD", value)
+            if not unicodedata.combining(ch)
+        )
+        value = re.sub(r"\s+", "_", value)
         value = value.replace("-", "_")
-        if not value or value in seen:
+        if not value:
             continue
-        seen.add(value)
-        normalized.append(value)
+        semantic_aliases = set()
+        if "restaurant" in value:
+            semantic_aliases.add("restaurant")
+        if "cafe" in value or "coffee" in value:
+            semantic_aliases.add("cafe")
+        if "museum" in value:
+            semantic_aliases.add("museum")
+        if "gallery" in value:
+            semantic_aliases.add("art_gallery")
+        if "park" in value:
+            semantic_aliases.add("park")
+        if "historic" in value or "heritage" in value:
+            semantic_aliases.add("historical_landmark")
+        if "landmark" in value:
+            semantic_aliases.add("historical_landmark")
+        if "monument" in value:
+            semantic_aliases.add("monument")
+        if "viewpoint" in value or "scenic" in value:
+            semantic_aliases.add("viewpoint")
+        if "bakery" in value:
+            semantic_aliases.add("bakery")
+        if "theater" in value or "theatre" in value:
+            semantic_aliases.add("performing_arts_theater")
+
+        for candidate in [value, *sorted(semantic_aliases)]:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            normalized.append(candidate)
     return normalized
 
 
@@ -131,14 +174,15 @@ def extract_name_based_type_hints(name: str) -> set[str]:
         "palace": "castle",
         "castle": "castle",
         "tower": "historical_landmark",
+        "monument": "monument",
+        "memorial": "memorial",
+        "ruins": "ruins",
+        "historic": "historic",
+        "viewpoint": "viewpoint",
         "park": "park",
         "garden": "garden",
         "beach": "beach",
-        "cafe": "cafe",
-        "coffee": "coffee_shop",
-        "bakery": "bakery",
-        "restaurant": "restaurant",
-        "market": "market",
+        "bazaar": "bazaar",
         "square": "plaza",
         "mosque": "mosque",
         "church": "church",
@@ -155,6 +199,48 @@ def extract_name_based_block_hints(name: str) -> set[str]:
     lowered = str(name or "").strip().lower()
     hints = set()
     keyword_map = {
+        "atm": "atm",
+        "bank": "bank",
+        "banka": "bank",
+        "pharmacy": "pharmacy",
+        "eczane": "pharmacy",
+        "hospital": "hospital",
+        "hastane": "hospital",
+        "doctor": "doctor",
+        "doktor": "doctor",
+        "dentist": "dentist",
+        "diş hekimi": "dentist",
+        "dis hekimi": "dentist",
+        "clinic": "medical_clinic",
+        "klinik": "medical_clinic",
+        "veterinary": "veterinary_care",
+        "veteriner": "veterinary_care",
+        "lawyer": "lawyer",
+        "avukat": "lawyer",
+        "insurance": "insurance_agency",
+        "sigorta": "insurance_agency",
+        "noter": "government_office",
+        "ptt": "post_office",
+        "otopark": "parking",
+        "parking": "parking",
+        "gas station": "gas_station",
+        "benzin": "gas_station",
+        "restaurant": "restaurant",
+        "restoran": "restaurant",
+        "burger": "fast_food",
+        "mcdonald": "fast_food",
+        "kfc": "fast_food",
+        "cafe": "cafe",
+        "coffee": "coffee_shop",
+        "bakery": "bakery",
+        "market": "market",
+        "supermarket": "supermarket",
+        "store": "store",
+        "magaza": "store",
+        "mağaza": "store",
+        "penti": "clothing_store",
+        "clothing": "clothing_store",
+        "shoe": "shoe_store",
         "university": "university",
         "college": "college",
         "school": "school",

@@ -224,16 +224,6 @@ export default function ProfileScreen({ route }) {
     }
   };
 
-  const handleSettingsPress = () => {
-    if (!isOwnProfile) return;
-    setIsActionsOpen(false);
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.alert('Ayarlar sayfasi yakinda gelecek.');
-      return;
-    }
-    Alert.alert('Ayarlar', 'Ayarlar sayfasi yakinda gelecek.');
-  };
-
   const handleEditProfilePress = () => {
     if (!isOwnProfile) return;
     setIsActionsOpen(false);
@@ -302,12 +292,6 @@ export default function ProfileScreen({ route }) {
 
         {isOwnProfile && isActionsOpen ? (
           <View style={styles.actionsPanel}>
-            <ProfileActionRow
-              label="Ayarlar"
-              description="Bildirim, hesap ve uygulama tercihleri"
-              icon="A"
-              onPress={handleSettingsPress}
-            />
             <ProfileActionRow
               label="Profili Duzenle"
               description="Foto, bio ve gorunen profil bilgileri"

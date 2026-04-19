@@ -5,7 +5,7 @@ from rest_framework.test import APITestCase
 from django.contrib.gis.geos import Point, Polygon
 from django.contrib.auth import get_user_model
 from .models import POI
-from .services import GeoService
+from .services import ExternalPlaceDTO, ExternalSyncService, GeoService
 
 User = get_user_model()
 
@@ -105,6 +105,90 @@ class GeoServiceTests(TestCase):
         self.assertNotIn(self.far_poi, results)
 
 
+class ExternalSyncServiceTests(TestCase):
+    def setUp(self):
+        self.service = ExternalSyncService(google_api_key=None, fsq_api_key=None)
+
+    def test_upsert_rejects_health_finance_and_service_places(self):
+        dto = ExternalPlaceDTO(
+            external_id="google-pharmacy-1",
+            name="Cankaya Eczane",
+            address="Cankaya, Ankara",
+            lat=39.9208,
+            lon=32.8541,
+            category="pharmacy",
+            metadata={"source": "google_places", "rating": 4.8, "user_ratings_total": 100},
+            tags=["pharmacy", "health", "point_of_interest"],
+        )
+
+        self.assertIsNone(self.service.upsert_poi(dto))
+        self.assertEqual(POI.objects.count(), 0)
+
+    def test_upsert_rejects_chain_food_and_stores(self):
+        for external_id, name, category, tags in [
+            ("google-burger-1", "Burger King Kizilay", "restaurant", ["restaurant", "food"]),
+            ("google-penti-1", "Penti Armada", "clothing_store", ["store", "clothing_store"]),
+            ("google-market-1", "Migros Market", "supermarket", ["store", "supermarket"]),
+        ]:
+            dto = ExternalPlaceDTO(
+                external_id=external_id,
+                name=name,
+                address="Ankara",
+                lat=39.9208,
+                lon=32.8541,
+                category=category,
+                metadata={"source": "google_places", "rating": 4.8, "user_ratings_total": 1000},
+                tags=tags,
+            )
+            self.assertIsNone(self.service.upsert_poi(dto))
+
+        self.assertEqual(POI.objects.count(), 0)
+
+    def test_upsert_accepts_and_enriches_travel_poi(self):
+        dto = ExternalPlaceDTO(
+            external_id="google-museum-1",
+            name="Anadolu Medeniyetleri Muzesi",
+            address="Altindag, Ankara",
+            lat=39.9385,
+            lon=32.8619,
+            category="museum",
+            metadata={"source": "google_places", "rating": 4.7, "user_ratings_total": 3500},
+            tags=["museum", "tourist_attraction", "point_of_interest"],
+        )
+
+        poi = self.service.upsert_poi(dto)
+
+        self.assertIsNotNone(poi)
+        self.assertEqual(poi.category, POI.Category.HISTORICAL)
+        self.assertEqual(poi.average_rating, 4.7)
+        self.assertIn("quality_score", poi.metadata)
+        self.assertIn("museum", poi.tags)
+
+    def test_upsert_dedupes_same_name_and_nearby_location(self):
+        existing = POI.objects.create(
+            name="Anitkabir",
+            address="Ankara",
+            location=Point(32.8369, 39.9250),
+            category=POI.Category.HISTORICAL,
+            tags=["historical"],
+        )
+        dto = ExternalPlaceDTO(
+            external_id="google-anitkabir",
+            name="Anitkabir",
+            address="Cankaya, Ankara",
+            lat=39.9251,
+            lon=32.8370,
+            category="tourist_attraction",
+            metadata={"source": "google_places", "rating": 4.9, "user_ratings_total": 100000},
+            tags=["tourist_attraction", "monument"],
+        )
+
+        self.assertIsNone(self.service.upsert_poi(dto))
+        self.assertEqual(POI.objects.count(), 1)
+        existing.refresh_from_db()
+        self.assertEqual(existing.external_id, "google-anitkabir")
+
+
 class POIAPITests(APITestCase):
     def setUp(self):
         # Create a test POI
@@ -118,6 +202,7 @@ class POIAPITests(APITestCase):
         self.list_url = reverse('locations:poi-list')
         self.nearby_url = reverse('locations:poi-nearby')
         self.viewport_url = reverse('locations:poi-viewport')
+        self.cities_url = reverse('locations:poi-cities')
 
     def test_list_pois(self):
         """Test listing all POIs."""
@@ -151,3 +236,14 @@ class POIAPITests(APITestCase):
         response = self.client.get(self.viewport_url, params)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 1)
+
+    def test_cities_endpoint_returns_supported_top_turkey_cities_without_existing_pois(self):
+        POI.objects.all().delete()
+
+        response = self.client.get(self.cities_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(response.data['count'], 10)
+        self.assertIn('Istanbul', response.data['results'])
+        self.assertIn('Ankara', response.data['results'])
+        self.assertIn('Kocaeli', response.data['results'])

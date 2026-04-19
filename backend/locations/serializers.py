@@ -73,6 +73,7 @@ class POIListSerializer(serializers.ModelSerializer):
     
     latitude = serializers.SerializerMethodField()
     longitude = serializers.SerializerMethodField()
+    display_category = serializers.SerializerMethodField()
     
     class Meta:
         model = POI
@@ -82,7 +83,10 @@ class POIListSerializer(serializers.ModelSerializer):
             'latitude',
             'longitude',
             'category',
+            'display_category',
             'average_rating',
+            'metadata',
+            'tags',
         ]
     
     def get_latitude(self, obj):
@@ -94,6 +98,20 @@ class POIListSerializer(serializers.ModelSerializer):
         if obj.location:
             return obj.location.x
         return None
+
+    def get_display_category(self, obj):
+        metadata = obj.metadata if isinstance(obj.metadata, dict) else {}
+        derived = str(metadata.get('derived_category') or '').upper()
+        primary = str(metadata.get('primary_category') or '').lower()
+        tags = set(str(tag or '').lower() for tag in (obj.tags or []))
+
+        if derived in {'CULTURE'}:
+            return 'CULTURE'
+        if primary in {'viewpoint', 'scenic_spot', 'observation_deck'} or tags.intersection(
+            {'viewpoint', 'scenic_spot', 'observation_deck'}
+        ):
+            return 'VIEWPOINT'
+        return obj.category
 
 
 class ClusterSerializer(serializers.Serializer):

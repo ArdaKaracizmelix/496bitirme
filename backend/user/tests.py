@@ -38,6 +38,26 @@ class POICategorizationTests(TestCase):
         self.assertTrue(result["is_meaningful_poi"])
         self.assertEqual(result["derived_category"], "HISTORICAL")
 
+    def test_pharmacy_name_is_not_meaningful_even_with_rating(self):
+        result = categorize_google_place(
+            ["point_of_interest", "establishment"],
+            "Cankaya Eczane",
+        )
+
+        self.assertFalse(result["is_meaningful_poi"])
+        self.assertEqual(result["derived_category"], "OTHER")
+        self.assertIn("pharmacy", result["blocked_types"])
+
+    def test_food_subcategory_is_not_map_poi(self):
+        result = categorize_google_place(
+            ["Turkish Restaurant", "Food and Beverage"],
+            "Ankara Sofrasi",
+        )
+
+        self.assertFalse(result["is_meaningful_poi"])
+        self.assertEqual(result["derived_category"], "OTHER")
+        self.assertIn("restaurant", result["blocked_types"])
+
 class UserProfileTests(TestCase):
     def setUp(self):
         # Create two users for testing interactions
