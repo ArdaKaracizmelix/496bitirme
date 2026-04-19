@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,6 +11,8 @@ import {
   View,
 } from 'react-native';
 import { formatTimeAgo } from './SocialPostCard';
+import { useCloneTrip } from '../hooks/useTrips';
+import { openInGoogleMaps } from '../utils/externalMaps';
 import {
   formatRouteDuration,
   formatRouteVisibility,
@@ -35,7 +39,7 @@ function StatPill({ label, value }) {
   );
 }
 
-function StopRow({ stop }) {
+function StopRow({ stop, onOpenMap }) {
   return (
     <View style={styles.stopRow}>
       <View style={styles.stopIndex}>
@@ -49,6 +53,9 @@ function StopRow({ stop }) {
             {stop.subtitle}
           </Text>
         )}
+        <TouchableOpacity style={styles.mapButton} onPress={() => onOpenMap(stop)}>
+          <Text style={styles.mapButtonText}>Haritada Ac</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -56,6 +63,8 @@ function StopRow({ stop }) {
 
 export default function RouteShareCard({ routeData, compact = false }) {
   const [visible, setVisible] = useState(false);
+  const cloneTripMutation = useCloneTrip();
+  const canClone = !!routeData?.id;
 
   const stats = useMemo(
     () => [
@@ -68,6 +77,45 @@ export default function RouteShareCard({ routeData, compact = false }) {
   );
 
   if (!routeData) return null;
+
+  const showFeedback = (title, message) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.alert(`${title}\n\n${message}`);
+      return;
+    }
+    Alert.alert(title, message);
+  };
+
+  const handleCloneRoute = async () => {
+    if (!canClone || cloneTripMutation.isPending) return;
+
+    try {
+      const clonedTrip = await cloneTripMutation.mutateAsync(routeData.id);
+      const clonedTitle = String(clonedTrip?.title || '').trim();
+      showFeedback('Basarili', clonedTitle ? `"${clonedTitle}" kopyalandi.` : 'Rota kopyalandi.');
+      setVisible(false);
+    } catch (error) {
+      const message =
+        error?.response?.data?.error ||
+        error?.response?.data?.detail ||
+        error?.message ||
+        'Rota kopyalanamadi.';
+      showFeedback('Hata', message);
+    }
+  };
+
+  const handleOpenStopMap = async (stop) => {
+    try {
+      await openInGoogleMaps({
+        name: stop?.name,
+        address: stop?.subtitle,
+        latitude: stop?.latitude,
+        longitude: stop?.longitude,
+      });
+    } catch (error) {
+      showFeedback('Hata', 'Bu durak icin harita acilamadi.');
+    }
+  };
 
   return (
     <>
@@ -146,7 +194,9 @@ export default function RouteShareCard({ routeData, compact = false }) {
               <View style={styles.stopsBlock}>
                 <Text style={styles.stopsTitle}>Duraklar</Text>
                 {routeData.stops?.length ? (
-                  routeData.stops.map((stop) => <StopRow key={stop.id} stop={stop} />)
+                  routeData.stops.map((stop) => (
+                    <StopRow key={stop.id} stop={stop} onOpenMap={handleOpenStopMap} />
+                  ))
                 ) : (
                   <View style={styles.emptyStops}>
                     <Text style={styles.emptyStopsTitle}>Durak detaylari bu paylasimda yok</Text>
@@ -156,6 +206,22 @@ export default function RouteShareCard({ routeData, compact = false }) {
                   </View>
                 )}
               </View>
+
+              <TouchableOpacity
+                style={[styles.cloneButton, (!canClone || cloneTripMutation.isPending) && styles.cloneButtonDisabled]}
+                onPress={handleCloneRoute}
+                disabled={!canClone || cloneTripMutation.isPending}
+              >
+                <Text style={styles.cloneButtonText}>
+                  {cloneTripMutation.isPending ? 'Kopyalaniyor...' : 'Rotayi Kopyala'}
+                </Text>
+              </TouchableOpacity>
+
+              {!canClone && (
+                <Text style={styles.cloneHint}>
+                  Bu paylasimda kopyalanabilir rota kimligi bulunamadi.
+                </Text>
+              )}
 
               <TouchableOpacity style={styles.closeButton} onPress={() => setVisible(false)}>
                 <Text style={styles.closeButtonText}>Kapat</Text>
@@ -414,6 +480,19 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginTop: 6,
   },
+  mapButton: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    backgroundColor: '#efe5d5',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  mapButtonText: {
+    color: colors.ink,
+    fontSize: 12,
+    fontWeight: '800',
+  },
   emptyStops: {
     borderRadius: 18,
     backgroundColor: colors.page,
@@ -432,8 +511,31 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginTop: 6,
   },
-  closeButton: {
+  cloneButton: {
     marginTop: 20,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accent,
+    paddingVertical: 14,
+  },
+  cloneButtonDisabled: {
+    backgroundColor: '#b6a98f',
+  },
+  cloneButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  cloneHint: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  closeButton: {
+    marginTop: 12,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',

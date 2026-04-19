@@ -6,16 +6,15 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Linking,
   Modal,
   TextInput,
-  Platform,
   Alert,
   Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import locationService from '../../services/locationService';
 import { getCategoryColor, getCategoryName } from '../../utils/mapUtils';
+import { openInGoogleMaps } from '../../utils/externalMaps';
 
 /**
  * POIDetailScreen - Comprehensive detail view for a Point of Interest
@@ -92,27 +91,19 @@ export default function POIDetailScreen({ route, navigation }) {
   /**
    * Open navigation app with destination coordinates
    */
-  const openNavigationApp = () => {
+  const openNavigationApp = async () => {
     if (!details) return;
 
-    const scheme = Platform.select({
-      ios: 'maps:0,0?q=',
-      android: 'geo:0,0?q=',
-    });
-    const latLng = `${details.latitude},${details.longitude}`;
-    const label = details.name;
-    const url = Platform.select({
-      ios: `${scheme}${label}@${latLng}`,
-      android: `${scheme}${latLng}(${label})`,
-    });
-
-    Linking.canOpenURL(url).then((supported) => {
-      if (supported) {
-        return Linking.openURL(url);
-      } else {
-        Alert.alert('Harita uygulaması bulunamadı');
-      }
-    });
+    try {
+      await openInGoogleMaps({
+        name: details.name,
+        address: details.address,
+        latitude: details.latitude,
+        longitude: details.longitude,
+      });
+    } catch (err) {
+      Alert.alert('Hata', 'Google Maps acilamadi');
+    }
   };
 
   /**
