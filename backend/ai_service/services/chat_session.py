@@ -190,6 +190,8 @@ class ChatSession:
             )
         elif context.themes:
             lines.append("\nTema: " + ", ".join(context.themes[:4]))
+        if context.min_rating is not None:
+            lines.append(f"\nFiltre: En az {context.min_rating:g}/5 puanli yerleri dikkate aldim.")
 
         if context.foods and ("food" in context.themes or context.intent == "food_recommendation"):
             lines.append("\nYemek molasi:")
@@ -245,6 +247,8 @@ class ChatSession:
                 "Ilgi alanlarina gore oncelik verdim: "
                 + ", ".join(context.user_interests[:4])
             )
+        if context.min_rating is not None:
+            lines.append(f"Puan filtresi: {context.min_rating:g}/5 ve uzeri.")
         if context.foods:
             lines.append("Yerel yemekler: " + ", ".join(context.foods[:5]))
         lines.append("Istersen bunu 1, 2 veya 3 gunluk gun gun plana cevirebilirim.")
@@ -319,6 +323,8 @@ class ChatSession:
             f"city={context.city or 'unknown'}",
             f"days={context.days or 'not specified'}",
             f"themes={context.themes}",
+            f"min_rating={context.min_rating or 'not specified'}",
+            f"sort_by_rating={context.sort_by_rating}",
             f"intent={context.intent}",
             f"user_interests={context.user_interests}",
             f"foods={context.foods}",

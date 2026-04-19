@@ -449,7 +449,7 @@ class TripGenerationService:
             metadata = poi.metadata or {}
             candidate_context.append(
                 {
-                    'candidate_id': int(poi.id),
+                    'candidate_id': str(poi.id),
                     'name': poi.name,
                     'address': str(poi.address or '').strip(),
                     'category': str(poi.category or '').strip(),
@@ -1301,7 +1301,7 @@ class TripGenerationService:
             daily_locations=daily_locations,
         )
         candidate_context = cls._build_candidate_context(candidate_pool, city)
-        candidate_map_by_id: Dict[int, POI] = {int(poi.id): poi for poi in candidate_pool}
+        candidate_map_by_id: Dict[str, POI] = {str(poi.id): poi for poi in candidate_pool}
         candidate_map_by_name: Dict[str, POI] = {}
         for poi in candidate_pool:
             candidate_map_by_name.setdefault(cls._normalize_text(poi.name), poi)
@@ -1325,7 +1325,7 @@ Schema:
       "pois": [
         {{
           "source": "candidate" or "new",
-          "candidate_id": 123,
+          "candidate_id": "uuid-string",
           "name": "string",
           "address": "string",
           "latitude": 0.0,
@@ -1342,7 +1342,7 @@ Rules:
 - Return exactly {stops_per_day} pois per day.
 - Prefer source="candidate" whenever a candidate fits well.
 - Use source="new" only when a strong, real, city-specific POI is missing from candidates.
-- For source="candidate", candidate_id must be one of the provided candidate_pois IDs.
+- For source="candidate", candidate_id must be one of the provided candidate_pois IDs exactly as a string.
 - For source="new", omit candidate_id or set it to null.
 - Never invent fake POIs.
 - Keep day locations aligned with the provided daily_locations.
@@ -1440,10 +1440,7 @@ Rules:
                 matched_poi = None
 
                 if source == 'candidate' and poi_entry.get('candidate_id') is not None:
-                    try:
-                        matched_poi = candidate_map_by_id.get(int(poi_entry.get('candidate_id')))
-                    except (TypeError, ValueError):
-                        matched_poi = None
+                    matched_poi = candidate_map_by_id.get(str(poi_entry.get('candidate_id')).strip())
 
                 if matched_poi is None and name:
                     matched_poi = candidate_map_by_name.get(cls._normalize_text(name))
@@ -1723,7 +1720,7 @@ Rules:
                     google_api_key=getattr(settings, 'GOOGLE_PLACES_API_KEY', None),
                     fsq_api_key=getattr(settings, 'FOURSQUARE_API_KEY', None),
                 )
-                sync_service.fetch_and_sync(center['lat'], center['lon'])
+                sync_service.fetch_and_sync(center['lat'], center['lon'], city=city)
                 candidates = list(POI.objects.filter(city_query).order_by('-average_rating')[:500])
             except Exception:
                 logger.exception("External city sync failed city=%s", city)
@@ -1747,6 +1744,7 @@ Rules:
         visibility: str,
         transport_mode: str,
         stops_per_day: int,
+        min_rating: Optional[float] = None,
         day_locations: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         max_stops = duration_days * stops_per_day
@@ -1754,6 +1752,14 @@ Rules:
 
         if not candidates:
             raise ValueError(f"No POIs found for city '{city}'.")
+
+        if min_rating is not None:
+            candidates = [
+                poi for poi in candidates
+                if float(poi.average_rating or 0.0) >= float(min_rating)
+            ]
+            if not candidates:
+                raise ValueError(f"No POIs found for city '{city}' with rating >= {float(min_rating):g}.")
 
         filtered_candidates = [poi for poi in candidates if self._is_poi_suitable_for_itinerary(poi, interests)]
         ranking_pool = filtered_candidates if len(filtered_candidates) >= max(4, min(max_stops, 10)) else candidates

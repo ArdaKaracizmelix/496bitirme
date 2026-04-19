@@ -530,6 +530,7 @@ class ItineraryViewSet(viewsets.ModelViewSet):
         visibility = payload.get('visibility', Itinerary.Visibility.PRIVATE)
         transport_mode = payload.get('transport_mode', Itinerary.TransportMode.DRIVING)
         stops_per_day = payload.get('stops_per_day', 4)
+        min_rating = payload.get('min_rating')
 
         from .services import TripGenerationService
 
@@ -544,6 +545,7 @@ class ItineraryViewSet(viewsets.ModelViewSet):
                 visibility=visibility,
                 transport_mode=transport_mode,
                 stops_per_day=stops_per_day,
+                min_rating=min_rating,
             )
         except ValueError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -573,6 +575,7 @@ class ItineraryViewSet(viewsets.ModelViewSet):
                     'city': city,
                     'duration_days': duration_days,
                     'interests': interests,
+                    'min_rating': min_rating,
                     'start_date': start_date.isoformat(),
                     'stops_per_day': stops_per_day,
                     'candidate_pois_count': result['candidate_pois_count'],

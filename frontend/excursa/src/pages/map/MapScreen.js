@@ -22,11 +22,18 @@ import {
 } from '../../utils/mapUtils';
 
 const CATEGORIES = [
-  { id: 'HISTORICAL', label: 'Tarihi' },
-  { id: 'CULTURE', label: 'Kultur' },
-  { id: 'VIEWPOINT', label: 'Manzara' },
-  { id: 'NATURE', label: 'Doga' },
-  { id: 'ENTERTAINMENT', label: 'Eglence' },
+  { id: 'HISTORICAL', label: 'Tarihi', helper: 'Muzeler, kaleler, anitlar' },
+  { id: 'CULTURE', label: 'Kultur', helper: 'Galeri ve kulturel alanlar' },
+  { id: 'VIEWPOINT', label: 'Manzara', helper: 'Seyir ve ikonik noktalar' },
+  { id: 'NATURE', label: 'Doga', helper: 'Parklar ve dogal alanlar' },
+  { id: 'ENTERTAINMENT', label: 'Etkinlik', helper: 'Sosyal gezi duraklari' },
+];
+
+const RATING_FILTERS = [
+  { value: 0, label: 'Tumu', helper: 'Puan filtresi yok' },
+  { value: 3, label: '3.0+', helper: 'Dengeli secimler' },
+  { value: 4, label: '4.0+', helper: 'Yuksek puanli' },
+  { value: 4.5, label: '4.5+', helper: 'En guclu duraklar' },
 ];
 
 const escapeHtml = (value = '') =>
@@ -261,7 +268,18 @@ export default function MapScreen({ navigation, route }) {
   const [searchDebouncedText, setSearchDebouncedText] = useState('');
   const webMapHtml = useMemo(
     () => buildWebMapHtml(displayedMarkers, currentRegion, isRouteMode ? routeStops : null),
-    [displayedMarkers, isRouteMode, routeStops]
+    [displayedMarkers, currentRegion, isRouteMode, routeStops]
+  );
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (activeFilters.category) count += 1;
+    if (activeFilters.minRating > 0) count += 1;
+    if (activeFilters.interestsOnly) count += 1;
+    return count;
+  }, [activeFilters]);
+  const activeCategoryLabel = useMemo(
+    () => CATEGORIES.find((item) => item.id === activeFilters.category)?.label,
+    [activeFilters.category]
   );
 
   useEffect(() => {
@@ -458,6 +476,37 @@ export default function MapScreen({ navigation, route }) {
               <View style={styles.filterBadge} />
             )}
           </TouchableOpacity>
+        
+
+        <TouchableOpacity
+          style={[styles.filterButton, activeFilterCount > 0 && styles.filterButtonActive]}
+          onPress={() => setFilterModalVisible(true)}
+        >
+          <Text style={[styles.filterButtonText, activeFilterCount > 0 && styles.filterButtonTextActive]}>
+            Filtre
+          </Text>
+          {activeFilterCount > 0 && (
+            <View style={styles.filterCountBadge}>
+              <Text style={styles.filterCountText}>{activeFilterCount}</Text>
+            </View>
+          )}
+          </TouchableOpacity>
+        </View>
+      )}
+        
+
+      {activeFilterCount > 0 && (
+        <View style={[styles.activeFilterRail, { top: insets.top + 66 }]}>
+          {activeCategoryLabel ? <Text style={styles.activeFilterChip}>{activeCategoryLabel}</Text> : null}
+          {activeFilters.minRating > 0 ? (
+            <Text style={styles.activeFilterChip}>{activeFilters.minRating}+ puan</Text>
+          ) : null}
+          {activeFilters.interestsOnly ? (
+            <Text style={styles.activeFilterChip}>Ilgi alanlarim</Text>
+          ) : null}
+          <TouchableOpacity style={styles.activeFilterClear} onPress={clearFilters}>
+            <Text style={styles.activeFilterClearText}>Temizle</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -478,11 +527,21 @@ export default function MapScreen({ navigation, route }) {
         visible={filterModalVisible}
         transparent={true}
         animationType="slide"
+        onRequestClose={() => setFilterModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => setFilterModalVisible(false)}
+          />
+          <View style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Filtrele</Text>
+              <View>
+                <Text style={styles.modalTitle}>Harita Filtreleri</Text>
+                <Text style={styles.modalSubtitle}>Gezilecek noktaları daha net keşfet</Text>
+              </View>
               <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
                 <Text style={styles.modalCloseText}>X</Text>
               </TouchableOpacity>
@@ -511,7 +570,17 @@ export default function MapScreen({ navigation, route }) {
                           { backgroundColor: getCategoryColor(cat.id) },
                         ]}
                       />
-                      <Text style={styles.categoryOptionText}>{cat.label}</Text>
+                      <View style={styles.categoryOptionCopy}>
+                        <Text
+                          style={[
+                            styles.categoryOptionText,
+                            activeFilters.category === cat.id && styles.categoryOptionTextActive,
+                          ]}
+                        >
+                          {cat.label}
+                        </Text>
+                        <Text style={styles.categoryOptionHelper}>{cat.helper}</Text>
+                      </View>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -520,18 +589,24 @@ export default function MapScreen({ navigation, route }) {
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Minimum Rating</Text>
                 <View style={styles.ratingOptions}>
-                  {[0, 3, 4, 4.5].map((rating) => (
+                  {RATING_FILTERS.map((rating) => (
                     <TouchableOpacity
-                      key={rating}
+                      key={rating.value}
                       style={[
                         styles.ratingOption,
-                        activeFilters.minRating === rating && styles.ratingOptionActive,
+                        activeFilters.minRating === rating.value && styles.ratingOptionActive,
                       ]}
-                      onPress={() => updateFilters({ minRating: rating })}
+                      onPress={() => updateFilters({ minRating: rating.value })}
                     >
-                      <Text style={styles.ratingOptionText}>
-                        {rating === 0 ? 'Tumu' : `${rating}+`}
+                      <Text
+                        style={[
+                          styles.ratingOptionText,
+                          activeFilters.minRating === rating.value && styles.ratingOptionTextActive,
+                        ]}
+                      >
+                        {rating.label}
                       </Text>
+                      <Text style={styles.ratingOptionHelper}>{rating.helper}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -541,18 +616,31 @@ export default function MapScreen({ navigation, route }) {
                 <Text style={styles.filterSectionTitle}>Ilgi Alani Modu</Text>
                 <TouchableOpacity
                   style={[
-                    styles.ratingOption,
-                    activeFilters.interestsOnly && styles.ratingOptionActive,
+                    styles.interestToggle,
+                    activeFilters.interestsOnly && styles.interestToggleActive,
                   ]}
                   onPress={() => updateFilters({ interestsOnly: !activeFilters.interestsOnly })}
                 >
-                  <Text style={styles.ratingOptionText}>
-                    {activeFilters.interestsOnly ? 'Sadece ilgi alanlarim' : 'Ilgi alanlarini onceliklendir'}
-                  </Text>
+                  <View>
+                    <Text
+                      style={[
+                        styles.interestToggleTitle,
+                        activeFilters.interestsOnly && styles.interestToggleTitleActive,
+                      ]}
+                    >
+                      Sadece ilgi alanlarim
+                    </Text>
+                    <Text style={styles.interestToggleHelper}>
+                      Kapaliyken ilgi alanlarin sadece siralamada oncelik verir.
+                    </Text>
+                  </View>
+                  <View style={[styles.switchTrack, activeFilters.interestsOnly && styles.switchTrackActive]}>
+                    <View style={[styles.switchThumb, activeFilters.interestsOnly && styles.switchThumbActive]} />
+                  </View>
                 </TouchableOpacity>
               </View>
 
-              {Object.values(activeFilters).some((value) => value) && (
+              {activeFilterCount > 0 && (
                 <TouchableOpacity
                   style={styles.clearFiltersButton}
                   onPress={() => {
@@ -564,6 +652,12 @@ export default function MapScreen({ navigation, route }) {
                 </TouchableOpacity>
               )}
             </ScrollView>
+            <TouchableOpacity
+              style={styles.applyFiltersButton}
+              onPress={() => setFilterModalVisible(false)}
+            >
+              <Text style={styles.applyFiltersButtonText}>Sonuclari Goster</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -675,9 +769,9 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   filterButton: {
-    minWidth: 64,
+    minWidth: 76,
     height: 44,
-    borderRadius: 8,
+    borderRadius: 14,
     backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
@@ -688,17 +782,70 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
+  filterButtonActive: {
+    backgroundColor: '#1a1a2e',
+  },
   filterButtonText: {
     fontSize: 14,
+    color: '#1a1a2e',
+    fontWeight: '700',
   },
-  filterBadge: {
+  filterButtonTextActive: {
+    color: '#fff',
+  },
+  filterCountBadge: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#e74c3c',
+    top: -6,
+    right: -5,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#f39c12',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  filterCountText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  activeFilterRail: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    zIndex: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  activeFilterChip: {
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+    color: '#1a1a2e',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    fontSize: 12,
+    fontWeight: '800',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  activeFilterClear: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  activeFilterClearText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
   },
   myLocationButton: {
     position: 'absolute',
@@ -869,76 +1016,111 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(13, 17, 35, 0.36)',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
   },
   modalContent: {
-    flex: 1,
     backgroundColor: '#fff',
     marginTop: 'auto',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 16,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 10,
+    maxHeight: '86%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    elevation: 14,
+  },
+  modalHandle: {
+    width: 48,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: '#d8dbe4',
+    alignSelf: 'center',
+    marginBottom: 8,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#ecf0f1',
+    borderBottomColor: '#f1f2f6',
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2c3e50',
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#1a1a2e',
+  },
+  modalSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#7d8293',
+    fontWeight: '600',
   },
   modalCloseText: {
-    fontSize: 24,
-    color: '#95a5a6',
+    fontSize: 20,
+    color: '#7d8293',
+    fontWeight: '800',
+    padding: 8,
   },
   filterOptions: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
   },
   filterSection: {
-    marginVertical: 16,
+    marginTop: 18,
   },
   filterSectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2c3e50',
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#1a1a2e',
     marginBottom: 12,
+    letterSpacing: 0.4,
   },
   categoryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
   },
   categoryOption: {
-    flex: 1,
-    minWidth: '45%',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#ecf0f1',
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    borderRadius: 18,
+    backgroundColor: '#f6f7fb',
+    borderWidth: 1,
+    borderColor: '#edf0f6',
   },
   categoryOptionActive: {
-    backgroundColor: '#e8f4f8',
-    borderWidth: 1,
-    borderColor: '#3498db',
+    backgroundColor: '#f0f2ff',
+    borderColor: '#1a1a2e',
   },
   categoryOptionDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 8,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    marginRight: 12,
+  },
+  categoryOptionCopy: {
+    flex: 1,
   },
   categoryOptionText: {
-    fontSize: 13,
-    color: '#2c3e50',
-    fontWeight: '500',
+    fontSize: 14,
+    color: '#1a1a2e',
+    fontWeight: '900',
+  },
+  categoryOptionTextActive: {
+    color: '#111426',
+  },
+  categoryOptionHelper: {
+    marginTop: 3,
+    fontSize: 11,
+    color: '#7d8293',
+    fontWeight: '600',
   },
   ratingOptions: {
     flexDirection: 'row',
@@ -946,30 +1128,108 @@ const styles = StyleSheet.create({
   },
   ratingOption: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 11,
     paddingHorizontal: 8,
-    borderRadius: 8,
-    backgroundColor: '#ecf0f1',
+    borderRadius: 16,
+    backgroundColor: '#f6f7fb',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#edf0f6',
   },
   ratingOptionActive: {
-    backgroundColor: '#3498db',
+    backgroundColor: '#1a1a2e',
+    borderColor: '#1a1a2e',
   },
   ratingOptionText: {
     fontSize: 13,
+    fontWeight: '900',
+    color: '#1a1a2e',
+  },
+  ratingOptionTextActive: {
+    color: '#fff',
+  },
+  ratingOptionHelper: {
+    marginTop: 3,
+    color: '#8c91a1',
+    fontSize: 9,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  interestToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
+    borderRadius: 20,
+    backgroundColor: '#f6f7fb',
+    borderWidth: 1,
+    borderColor: '#edf0f6',
+    padding: 14,
+  },
+  interestToggleActive: {
+    backgroundColor: '#f0f2ff',
+    borderColor: '#1a1a2e',
+  },
+  interestToggleTitle: {
+    color: '#1a1a2e',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  interestToggleTitleActive: {
+    color: '#111426',
+  },
+  interestToggleHelper: {
+    marginTop: 4,
+    color: '#7d8293',
+    fontSize: 11,
     fontWeight: '600',
-    color: '#2c3e50',
+    maxWidth: 245,
+  },
+  switchTrack: {
+    width: 46,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#d8dbe4',
+    padding: 3,
+  },
+  switchTrackActive: {
+    backgroundColor: '#1a1a2e',
+  },
+  switchThumb: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#fff',
+  },
+  switchThumbActive: {
+    transform: [{ translateX: 18 }],
   },
   clearFiltersButton: {
-    marginVertical: 16,
+    marginTop: 18,
+    marginBottom: 8,
     paddingVertical: 12,
-    backgroundColor: '#e74c3c',
-    borderRadius: 8,
+    backgroundColor: '#fff3f1',
+    borderRadius: 16,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ffd6cf',
   },
   clearFiltersButtonText: {
-    color: '#fff',
-    fontWeight: '600',
+    color: '#e74c3c',
+    fontWeight: '900',
     fontSize: 14,
+  },
+  applyFiltersButton: {
+    marginHorizontal: 20,
+    marginTop: 12,
+    borderRadius: 18,
+    backgroundColor: '#1a1a2e',
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  applyFiltersButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '900',
   },
 });

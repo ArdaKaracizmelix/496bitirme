@@ -190,8 +190,18 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
             .filter(Boolean)
         : [];
 
-      // 1) Generate/sync city POIs for this user's interests (Google Places pipeline).
-      await locationService.generatePOIsForCity(city, userInterests, 20000);
+      // 1) Warm up city POIs. This is best-effort: the itinerary endpoint has
+      // its own fallback pipeline, so a slow external Places sync must not block
+      // AI route creation on mobile networks.
+      try {
+        await locationService.generatePOIsForCity(city, userInterests, 20000);
+      } catch (poiError) {
+        const message =
+          poiError?.response?.data?.error ||
+          poiError?.message ||
+          'POI sync skipped';
+        console.warn('City POI pre-sync skipped before AI route generation:', message);
+      }
 
       // 2) Generate itinerary from now-available city POIs.
       const result = await store.generateTripFromPreferences({
@@ -763,6 +773,8 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
           )}
         </View>
 
+        {false && (
+        <>
         {/* Additional Actions */}
         <View style={styles.section}>
           <TouchableOpacity style={styles.actionButton} onPress={handleShowOnMap}>
@@ -776,6 +788,16 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
           <TouchableOpacity style={styles.actionButton}>
             <Text style={styles.actionButtonIcon}>📅</Text>
             <Text style={styles.actionButtonText}>Takvime Ekle</Text>
+          </TouchableOpacity>
+        </View>
+
+        </>
+        )}
+
+        <View style={styles.section}>
+          <TouchableOpacity style={styles.actionButton}>
+            <Text style={styles.actionButtonIcon}>Map</Text>
+            <Text style={styles.actionButtonText}>Harita Uzerinde Goster</Text>
           </TouchableOpacity>
         </View>
 

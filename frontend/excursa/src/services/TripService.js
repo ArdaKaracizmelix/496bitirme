@@ -80,10 +80,18 @@ class TripService {
    */
   async generateTripFromPreferences(payload) {
     try {
-      const response = await api.post('/trips/itineraries/generate_from_preferences/', payload);
+      const response = await api.post('/trips/itineraries/generate_from_preferences/', payload, {
+        timeout: 120000,
+      });
       return response.data;
     } catch (error) {
-      console.error('Error generating trip from preferences:', error);
+      const status = error?.response?.status;
+      const message =
+        error?.response?.data?.error ||
+        error?.response?.data?.detail ||
+        error?.message ||
+        'Trip generation request failed';
+      console.warn('Trip generation failed:', { status, message });
       throw error;
     }
   }

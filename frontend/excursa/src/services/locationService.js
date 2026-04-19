@@ -66,6 +66,12 @@ export const locationService = {
       if (filters.min_rating) {
         params.append('min_rating', filters.min_rating.toString());
       }
+      if (Array.isArray(filters.interests) && filters.interests.length > 0) {
+        params.append('interests', filters.interests.join(','));
+      }
+      if (filters.interests_only) {
+        params.append('interests_only', 'true');
+      }
 
       const response = await api.get(`/locations/pois/viewport/?${params}`, {
         skipAuth: true,
@@ -172,10 +178,17 @@ export const locationService = {
         city,
         interests,
         radius,
+      }, {
+        timeout: 90000,
       });
       return response.data;
     } catch (error) {
-      console.error('Error generating POIs for city:', error);
+      const status = error?.response?.status;
+      const message =
+        error?.response?.data?.error ||
+        error?.message ||
+        'POI generation request failed';
+      console.warn('POI generation skipped:', { city, status, message });
       throw error;
     }
   },
