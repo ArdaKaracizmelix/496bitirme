@@ -19,12 +19,11 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatTimeAgo } from '../components/SocialPostCard';
+import AppAvatar from '../components/AppAvatar';
 import RouteShareCard from '../components/RouteShareCard';
 import { useAddComment, usePost, usePostComments, useToggleLike, useToggleSave } from '../hooks/useSocial';
 import { buildPostLink, copyTextToClipboard } from '../utils/linkUtils';
 import { getPostPresentation } from '../utils/routeShareUtils';
-
-const FALLBACK_AVATAR = 'https://i.pravatar.cc/150?img=12';
 
 export default function PostDetailScreen() {
   const navigation = useNavigation();
@@ -144,10 +143,7 @@ export default function PostDetailScreen() {
         style={styles.ownerRow}
         onPress={() => openUserProfile(post?.user_ref_id || post?.user_id, post?.user_name, post?.avatar_url)}
       >
-        <Image
-          source={{ uri: post?.avatar_url || FALLBACK_AVATAR }}
-          style={styles.ownerAvatar}
-        />
+        <AppAvatar uri={post?.avatar_url} style={styles.ownerAvatar} />
         <View style={styles.ownerMeta}>
           <Text style={styles.ownerName} numberOfLines={1}>
             {post?.user_name || 'Gezgin'}
@@ -214,10 +210,7 @@ export default function PostDetailScreen() {
         style={styles.commentOwnerPress}
         onPress={() => openUserProfile(item?.user_id, item?.user_name, item?.avatar_url)}
       >
-        <Image
-          source={{ uri: item?.avatar_url || FALLBACK_AVATAR }}
-          style={styles.commentAvatar}
-        />
+        <AppAvatar uri={item?.avatar_url} style={styles.commentAvatar} />
       </TouchableOpacity>
       <View style={styles.commentBubble}>
         <View style={styles.commentHeader}>

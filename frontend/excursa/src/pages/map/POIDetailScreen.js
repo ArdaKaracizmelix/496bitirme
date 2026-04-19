@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import locationService from '../../services/locationService';
+import useAuthStore from '../../store/authStore';
 import { getCategoryColor, getCategoryName } from '../../utils/mapUtils';
 import { openInGoogleMaps } from '../../utils/externalMaps';
 
@@ -23,6 +24,10 @@ import { openInGoogleMaps } from '../../utils/externalMaps';
 export default function POIDetailScreen({ route, navigation }) {
   const { poiId } = route.params;
   const insets = useSafeAreaInsets();
+  const user = useAuthStore((state) => state.user);
+  const currentUserId = String(
+    user?.id || user?.profile_id || user?.profile?.id || ''
+  );
 
   // State
   const [details, setDetails] = useState(null);
@@ -41,6 +46,25 @@ export default function POIDetailScreen({ route, navigation }) {
   const [reviewText, setReviewText] = useState('');
   const [reviewRating, setReviewRating] = useState(5);
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [editingReviewId, setEditingReviewId] = useState(null);
+
+  const getReviewOwnerId = (review) => {
+    if (!review) return '';
+    if (typeof review.user === 'string' || typeof review.user === 'number') {
+      return String(review.user);
+    }
+    return String(
+      review.user?.id ||
+      review.user?.profile_id ||
+      review.user?.profile?.id ||
+      ''
+    );
+  };
+
+  const userReview = useMemo(
+    () => reviews.find((review) => getReviewOwnerId(review) === currentUserId),
+    [reviews, currentUserId]
+  );
 
   /**
    * Fetch POI details on mount
@@ -124,21 +148,50 @@ export default function POIDetailScreen({ route, navigation }) {
   const submitReview = async () => {
     try {
       setSubmittingReview(true);
-      await locationService.submitReview(poiId, reviewRating, reviewText);
+      if (editingReviewId) {
+        await locationService.updateReview(editingReviewId, reviewRating, reviewText);
+      } else {
+        await locationService.submitReview(poiId, reviewRating, reviewText);
+      }
       
       // Reset form and close modal
       setReviewText('');
       setReviewRating(5);
+      setEditingReviewId(null);
       setReviewModalVisible(false);
       
       // Refresh reviews
       await fetchPOIDetails();
-      Alert.alert('Başarılı', 'Yorum başarıyla gönderildi');
+      Alert.alert(
+        'Başarılı',
+        editingReviewId ? 'Yorum başarıyla güncellendi' : 'Yorum başarıyla gönderildi'
+      );
     } catch (err) {
-      Alert.alert('Hata', 'Yorum gönderilemedi');
+      Alert.alert('Hata', editingReviewId ? 'Yorum güncellenemedi' : 'Yorum gönderilemedi');
     } finally {
       setSubmittingReview(false);
     }
+  };
+
+  const openCreateReviewModal = () => {
+    setEditingReviewId(null);
+    setReviewText('');
+    setReviewRating(5);
+    setReviewModalVisible(true);
+  };
+
+  const openEditReviewModal = (review) => {
+    setEditingReviewId(review.id);
+    setReviewText(review.comment || '');
+    setReviewRating(Number(review.rating) || 5);
+    setReviewModalVisible(true);
+  };
+
+  const closeReviewModal = () => {
+    setReviewModalVisible(false);
+    setEditingReviewId(null);
+    setReviewText('');
+    setReviewRating(5);
   };
 
   /**
@@ -308,9 +361,11 @@ export default function POIDetailScreen({ route, navigation }) {
             <Text style={styles.sectionTitle}>Yorumlar</Text>
             <TouchableOpacity
               style={styles.addReviewButton}
-              onPress={() => setReviewModalVisible(true)}
+              onPress={() => (userReview ? openEditReviewModal(userReview) : openCreateReviewModal())}
             >
-              <Text style={styles.addReviewButtonText}>+ Yorum Ekle</Text>
+              <Text style={styles.addReviewButtonText}>
+                {userReview ? 'Yorumunu Düzenle' : '+ Yorum Ekle'}
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -327,6 +382,14 @@ export default function POIDetailScreen({ route, navigation }) {
                 </View>
                 {review.comment && (
                   <Text style={styles.reviewComment}>{review.comment}</Text>
+                )}
+                {getReviewOwnerId(review) === currentUserId && (
+                  <TouchableOpacity
+                    style={styles.editReviewButton}
+                    onPress={() => openEditReviewModal(review)}
+                  >
+                    <Text style={styles.editReviewButtonText}>Düzenle</Text>
+                  </TouchableOpacity>
                 )}
                 <Text style={styles.reviewDate}>
                   {new Date(review.created_at).toLocaleDateString('tr-TR')}
@@ -349,8 +412,10 @@ export default function POIDetailScreen({ route, navigation }) {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Yorum Ekle</Text>
-              <TouchableOpacity onPress={() => setReviewModalVisible(false)}>
+              <Text style={styles.modalTitle}>
+                {editingReviewId ? 'Yorumu Düzenle' : 'Yorum Ekle'}
+              </Text>
+              <TouchableOpacity onPress={closeReviewModal}>
                 <Text style={styles.modalCloseButton}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -396,7 +461,9 @@ export default function POIDetailScreen({ route, navigation }) {
               {submittingReview ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.submitButtonText}>Gönder</Text>
+                <Text style={styles.submitButtonText}>
+                  {editingReviewId ? 'Güncelle' : 'Gönder'}
+                </Text>
               )}
             </TouchableOpacity>
           </View>
@@ -655,6 +722,20 @@ const styles = StyleSheet.create({
   reviewDate: {
     color: '#95a5a6',
     fontSize: 11,
+    marginTop: 2,
+  },
+  editReviewButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#e8f4f8',
+    borderRadius: 12,
+    marginBottom: 6,
+  },
+  editReviewButtonText: {
+    color: '#3498db',
+    fontSize: 11,
+    fontWeight: '600',
   },
   loadingContainer: {
     flex: 1,

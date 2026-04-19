@@ -5,12 +5,12 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Image,
   ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import AppAvatar from '../components/AppAvatar';
 import { useFollowList } from '../hooks/useSocial';
 
 export default function FollowersListScreen({ route }) {
@@ -41,10 +41,7 @@ export default function FollowersListScreen({ route }) {
 
   const renderRow = ({ item }) => (
     <TouchableOpacity style={styles.row} onPress={() => navigateToProfile(item)}>
-      <Image
-        source={{ uri: item.avatar_url || 'https://i.pravatar.cc/150?img=1' }}
-        style={styles.avatar}
-      />
+      <AppAvatar uri={item.avatar_url} style={styles.avatar} />
       <View style={styles.rowInfo}>
         <Text style={styles.fullName}>{item.full_name || 'Kullanici'}</Text>
         <Text style={styles.username}>@{item.username || 'user'}</Text>

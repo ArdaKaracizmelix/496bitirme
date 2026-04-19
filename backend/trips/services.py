@@ -257,6 +257,15 @@ class TripGenerationService:
         'instead of',
     }
 
+    _BLOCKED_SUGGESTION_TOKENS = {
+        'candidate_pois', 'candidate_poi', 'candidate ids', 'candidate_ids',
+        'category', 'categories', 'description', 'reason', 'address', 'latitude', 'longitude',
+        'poi', 'pois', 'day', 'days', 'focus', 'location', 'daily_themes', 'suggested_pois',
+        'historical_landmark', 'historical landmark', 'art_gallery', 'art gallery', 'museum',
+        'monument', 'food', 'restaurant', 'cafe', 'coffee_shop', 'nature', 'park',
+        'entertainment', 'shopping', 'wellness', 'transportation', 'lodging'
+    }
+
     @staticmethod
     def _normalize_interests(interests: List[str]) -> List[str]:
         return [
@@ -380,6 +389,12 @@ class TripGenerationService:
         except Exception:
             return None
 
+    @staticmethod
+    def _should_include_ai_debug() -> bool:
+        return bool(
+            getattr(settings, 'ITINERARY_AI_DEBUG', False)
+            or getattr(settings, 'DEBUG', False)
+        )
 
     @staticmethod
     def _generate_llm_json_response(llm_client, *, messages: List[Dict[str, Any]], max_tokens: int = 1200) -> str:
@@ -434,28 +449,22 @@ class TripGenerationService:
 
     @classmethod
     def _build_candidate_context(cls, candidate_pool: List[POI], city: str) -> List[Dict[str, Any]]:
+        """
+        Keep candidate context intentionally compact.
+
+        The AI only needs enough information to choose among existing POIs.
+        Sending full addresses and coordinates for every candidate increases
+        token usage and latency without helping much for day-level selection.
+        """
         candidate_context: List[Dict[str, Any]] = []
         for poi in candidate_pool:
-            lat = None
-            lon = None
-            if getattr(poi, 'location', None):
-                try:
-                    lon = float(poi.location.x)
-                    lat = float(poi.location.y)
-                except Exception:
-                    lat = None
-                    lon = None
-
             metadata = poi.metadata or {}
             candidate_context.append(
                 {
                     'candidate_id': str(poi.id),
                     'name': poi.name,
-                    'address': str(poi.address or '').strip(),
                     'category': str(poi.category or '').strip(),
-                    'tags': [str(tag).strip() for tag in (poi.tags or [])[:8] if str(tag).strip()],
-                    'latitude': lat,
-                    'longitude': lon,
+                    'tags': [str(tag).strip() for tag in (poi.tags or [])[:6] if str(tag).strip()],
                     'area': (
                         str(metadata.get('district') or '').strip()
                         or str(metadata.get('locality') or '').strip()
@@ -870,46 +879,14 @@ class TripGenerationService:
     def _sanitize_suggested_names(cls, names: List[str], city: str) -> List[str]:
         city_norm = re.sub(r'\s+', ' ', str(city or '').strip().lower())
         blocked_prefixes = (
-            'we need',
-            'let us',
-            "let's",
-            'return ',
-            'city:',
-            'duration',
-            'interests',
-            'max stops',
-            'provide ',
-            'output ',
-            'json',
-            'day ',
-            'so we need',
+            'we need', 'let us', "let's", 'return ', 'city:', 'duration', 'interests',
+            'max stops', 'provide ', 'output ', 'json', 'day ', 'so we need',
         )
-        
-        # Meta-text patterns that indicate fragments or reasoning text
         meta_text_patterns = (
-            'ensure no duplicates',
-            'pick real',
-            'provide ',
-            'let\'s pick',
-            'let\'s list',
-            'let\'s gather',
-            'need to',
-            'need real',
-            'now pick',
-            'actually ',
-            'but we need',
-            'alternatively pick',
-            'such as',
-            'for example',
-            'instead of',
-            'maybe',
-            'let me',
-            'gather coordinates',
-            'find address',
-            'coordinate',
-            'address unknown',
-            'realistic',
-            'distinct',
+            'ensure no duplicates', 'pick real', 'provide ', "let's pick", "let's list",
+            "let's gather", 'need to', 'need real', 'now pick', 'actually ', 'but we need',
+            'alternatively pick', 'such as', 'for example', 'instead of', 'maybe', 'let me',
+            'gather coordinates', 'find address', 'coordinate', 'address unknown', 'realistic', 'distinct',
         )
 
         cleaned = []
@@ -920,43 +897,35 @@ class TripGenerationService:
             if len(name) < 3:
                 continue
             lower = name.lower()
-            
-            # Filter blocked prefixes
+            normalized = lower.replace('-', ' ').replace('_', ' ').strip()
+
             if lower.startswith(blocked_prefixes):
                 continue
-            
-            # Filter meta-text patterns
             if any(phrase in lower for phrase in meta_text_patterns):
                 continue
-            
-            # Filter obvious fragments (single lowercase letter followed by space)
-            if re.match(r'^[a-z]\s+', name):
-                continue
-            
-            # Filter names that are clearly incomplete sentences or phrases
             if any(phrase in lower for phrase in cls._BAD_NAME_PHRASES):
                 continue
             if lower in {city_norm, f'{city_norm}, turkey', f'{city_norm}, türkiye'}:
                 continue
-            if any(token in lower for token in ('duration', 'max stops', 'interests list', 'produce json')):
+            if normalized in cls._BLOCKED_SUGGESTION_TOKENS or lower in cls._BLOCKED_SUGGESTION_TOKENS:
+                continue
+            if re.match(r'^[a-z]\s+', name):
+                continue
+            if re.match(r'^\d+\.', name):
+                continue
+            if '|' in name:
                 continue
             if not re.search(r'[A-Za-zÀ-ÿ]', name):
                 continue
-            
-            # Name should not be too long (likely prose)
-            if len(name.split()) > 7:
+            if len(name.split()) > 8:
                 continue
-            
-            # Too many periods suggests code/meta-text
             if name.count('.') > 1:
                 continue
-            
-            # Reject if starts with numbers followed by dot (numbered list remnant)
-            if re.match(r'^\d+\.', name):
+            # Reject obvious schema-ish single-token or snake_case placeholders.
+            if ('_' in name or name.islower()) and len(name.split()) <= 2 and normalized in cls._BLOCKED_SUGGESTION_TOKENS:
                 continue
-            
-            # Reject names with pipe characters (format markers)
-            if '|' in name:
+            # Reject generic noun phrases without a proper place-like signal.
+            if len(name.split()) <= 3 and normalized in cls._BLOCKED_SUGGESTION_TOKENS:
                 continue
 
             key = lower
@@ -969,32 +938,18 @@ class TripGenerationService:
 
     @classmethod
     def _extract_suggested_names(cls, parsed: Dict[str, Any], raw_text: str) -> List[str]:
-        suggested = parsed.get('suggested_pois')
+        suggested = parsed.get('suggested_pois') if isinstance(parsed, dict) else None
         names = []
         if isinstance(suggested, list):
             for item in suggested:
                 if isinstance(item, dict) and item.get('name'):
                     names.append(str(item.get('name')).strip())
-                elif isinstance(item, str):
+                elif isinstance(item, str) and item.strip():
                     names.append(item.strip())
-
-        if not names:
-            fallback_keys = ['suggested_names', 'poi_names', 'places', 'ordered_poi_names']
-            for key in fallback_keys:
-                value = parsed.get(key)
-                if isinstance(value, list):
-                    for item in value:
-                        if isinstance(item, str) and item.strip():
-                            names.append(item.strip())
-                if names:
-                    break
-
-        if not names:
-            names = cls._extract_names_from_text(raw_text)
 
         normalized = []
         seen = set()
-        for name in names:
+        for name in cls._sanitize_suggested_names(names, ''):
             clean = str(name or '').strip()
             if not clean:
                 continue
@@ -1009,31 +964,28 @@ class TripGenerationService:
     def _extract_suggested_items(cls, parsed: Dict[str, Any], raw_text: str) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
         suggested = parsed.get('suggested_pois') if isinstance(parsed, dict) else None
-        if isinstance(suggested, list):
-            for item in suggested:
-                if isinstance(item, dict):
-                    name = str(item.get('name') or '').strip()
-                    if not name:
-                        continue
-                    items.append(
-                        {
-                            'name': name,
-                            'reason': str(item.get('reason') or '').strip(),
-                            'address': str(item.get('address') or '').strip(),
-                            'day': item.get('day'),
-                            'latitude': item.get('latitude'),
-                            'longitude': item.get('longitude'),
-                        }
-                    )
-                elif isinstance(item, str) and item.strip():
-                    items.append({'name': item.strip()})
+        if not isinstance(suggested, list):
+            return []
 
-        if items:
-            return items
+        for item in suggested:
+            if isinstance(item, dict):
+                name = str(item.get('name') or '').strip()
+                if not name:
+                    continue
+                items.append(
+                    {
+                        'name': name,
+                        'reason': str(item.get('reason') or '').strip(),
+                        'address': str(item.get('address') or '').strip(),
+                        'day': item.get('suggested_day') if item.get('suggested_day') is not None else item.get('day'),
+                        'latitude': item.get('latitude'),
+                        'longitude': item.get('longitude'),
+                    }
+                )
+            elif isinstance(item, str) and item.strip():
+                items.append({'name': item.strip()})
 
-        # Fallback from unstructured text.
-        names = cls._extract_suggested_names(parsed, raw_text)
-        return [{'name': name} for name in names]
+        return items
 
     @classmethod
     def _is_poi_suitable_for_itinerary(cls, poi: POI, interests: List[str]) -> bool:
@@ -1218,28 +1170,6 @@ class TripGenerationService:
         else:
             geo = {}
 
-        # Last-resort fallback: anchor unmatched AI place to city center.
-        if latitude is None or longitude is None:
-            center = cls._geocode_city_center(city)
-            if center:
-                base_lat = float(center['lat'])
-                base_lon = float(center['lon'])
-                # Deterministic micro-offset by place name to avoid stacked identical points.
-                digest = hashlib.sha1(name.encode('utf-8')).hexdigest()
-                lat_offset = ((int(digest[:4], 16) % 2001) - 1000) * 0.00001
-                lon_offset = ((int(digest[4:8], 16) % 2001) - 1000) * 0.00001
-                latitude = base_lat + lat_offset
-                longitude = base_lon + lon_offset
-                if not address:
-                    address = f"{name}, {city}"
-                geo = {
-                    'source': 'city_center_fallback',
-                    'city_center_lat': base_lat,
-                    'city_center_lon': base_lon,
-                    'lat_offset': lat_offset,
-                    'lon_offset': lon_offset,
-                }
-
         if latitude is None or longitude is None:
             return None
 
@@ -1274,6 +1204,281 @@ class TripGenerationService:
         except Exception:
             logger.exception("Failed creating AI suggested POI city=%s name=%s", city, name)
             return None
+
+    @classmethod
+    def _suggest_pois_with_ai(
+        cls,
+        *,
+        city: str,
+        duration_days: int,
+        interests: List[str],
+        stops_per_day: int,
+        daily_locations: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        llm_client = cls._build_llm_client()
+        if llm_client is None:
+            return {'reason': 'llm_unavailable', 'suggested_pois': [], 'daily_themes': []}
+
+        daily_locations = cls._normalize_daily_locations(
+            city=city,
+            duration_days=duration_days,
+            daily_locations=daily_locations,
+        )
+        max_suggestions = max(duration_days * stops_per_day + 4, min(duration_days * stops_per_day + 8, 24))
+
+        system_prompt = f"""Return ONLY valid JSON.
+Do NOT write explanations.
+Do NOT write reasoning.
+Do NOT write markdown.
+Do NOT write code fences.
+Do NOT write any text outside the JSON object.
+The response must be parseable by json.loads().
+
+Schema:
+{{
+  "daily_themes": ["string"],
+  "suggested_pois": [
+    {{
+      "name": "string",
+      "reason": "string",
+      "address": "string",
+      "suggested_day": 1
+    }}
+  ]
+}}
+
+Rules:
+- Suggest between {duration_days * stops_per_day} and {max_suggestions} POIs, prioritizing quality over quantity.
+- Use only real, visitable, city-relevant POIs.
+- Prefer famous landmarks, museums, major parks, notable cultural sites, and high-signal places matching the interests.
+- Avoid hospitals, schools, office buildings, random businesses, parking areas, and generic local services.
+- Avoid duplicates and near-duplicates.
+- suggested_day must be between 1 and {duration_days}.
+- address may be empty if unknown.
+- Never output schema words, category names, field names, placeholders, or descriptive fragments as POI names.
+- Examples of forbidden outputs: candidate_pois, category, description, historical_landmark, art_gallery.
+- Allowed top-level keys: daily_themes, suggested_pois.
+- Allowed POI keys: name, reason, address, suggested_day.
+"""
+
+        payload_json = json.dumps(
+            {
+                'city': city,
+                'duration_days': duration_days,
+                'stops_per_day': stops_per_day,
+                'interests': interests,
+                'daily_locations': daily_locations,
+                'instructions': 'Suggest candidate POIs first. Planning into verified day-by-day route happens later.',
+            },
+            ensure_ascii=False,
+        )
+        messages = [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': payload_json},
+        ]
+
+        raw_response = ''
+        retry_raw = ''
+        parsed: Dict[str, Any] = {}
+        try:
+            raw_response = cls._generate_llm_json_response(
+                llm_client,
+                messages=messages,
+                max_tokens=1800,
+            )
+            parsed = cls._extract_json_object(raw_response)
+        except Exception:
+            logger.exception('AI POI suggestion first pass failed city=%s', city)
+
+        if not isinstance(parsed, dict) or not isinstance(parsed.get('suggested_pois'), list):
+            retry_messages = [
+                {
+                    'role': 'system',
+                    'content': (
+                        'Return ONLY valid JSON. No prose. No markdown. No code fences. '
+                        'Use exactly the same schema as before. Output the final JSON object directly.'
+                    ),
+                },
+                {'role': 'user', 'content': payload_json},
+            ]
+            try:
+                retry_raw = cls._generate_llm_json_response(
+                    llm_client,
+                    messages=retry_messages,
+                    max_tokens=1800,
+                )
+                parsed = cls._extract_json_object(retry_raw)
+            except Exception:
+                logger.exception('AI POI suggestion retry failed city=%s', city)
+
+        source_text = raw_response or retry_raw
+        suggested_items = cls._extract_suggested_items(parsed if isinstance(parsed, dict) else {}, source_text)
+        suggested_items = [
+            item for item in suggested_items
+            if cls._sanitize_suggested_names([str(item.get('name') or '')], city)
+        ][:max_suggestions]
+
+        result = {
+            'reason': 'ok' if suggested_items else 'invalid_ai_output',
+            'suggested_pois': suggested_items,
+            'daily_themes': [
+                str(item).strip()
+                for item in (parsed.get('daily_themes') if isinstance(parsed, dict) and isinstance(parsed.get('daily_themes'), list) else [])
+                if str(item).strip()
+            ],
+        }
+        if cls._should_include_ai_debug():
+            result['suggestions_ai_debug'] = {
+                'raw_response': raw_response,
+                'retry_raw_response': retry_raw,
+                'parsed_response': parsed if isinstance(parsed, dict) else {},
+            }
+        return result
+
+    @classmethod
+    def _resolve_ai_suggested_pois(
+        cls,
+        *,
+        city: str,
+        suggestions: List[Dict[str, Any]],
+        interests: List[str],
+        max_stops: int,
+        min_rating: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        resolved: List[POI] = []
+        seen_ids = set()
+        unresolved: List[Dict[str, Any]] = []
+        debug_items: List[Dict[str, Any]] = []
+        city_center = cls._geocode_city_center(city)
+
+        max_candidates_to_resolve = min(max(max_stops + 4, 12), max_stops * 2)
+        for suggestion in (suggestions or [])[:max_candidates_to_resolve]:
+            name = str(suggestion.get('name') or '').strip()
+            if not name:
+                continue
+            if not cls._sanitize_suggested_names([name], city):
+                if cls._should_include_ai_debug():
+                    debug_items.append({'name': name, 'status': 'filtered_schema_or_noise'})
+                continue
+
+            resolved_poi = cls._find_existing_city_poi_by_name(city, name)
+            resolution_source = 'db_match' if resolved_poi is not None else None
+
+            if resolved_poi is None:
+                resolved_poi = cls._upsert_ai_suggested_poi(
+                    city=city,
+                    suggestion=suggestion,
+                    interests=interests,
+                )
+                if resolved_poi is not None:
+                    resolution_source = str((resolved_poi.metadata or {}).get('source') or 'external_lookup')
+
+            if resolved_poi is None:
+                unresolved.append(suggestion)
+                if cls._should_include_ai_debug():
+                    debug_items.append({'name': name, 'status': 'unresolved'})
+                continue
+
+            if min_rating is not None and float(resolved_poi.average_rating or 0.0) < float(min_rating):
+                if cls._should_include_ai_debug():
+                    debug_items.append({'name': name, 'status': 'filtered_min_rating'})
+                continue
+
+            if city_center and getattr(resolved_poi, 'location', None):
+                try:
+                    poi_lat = float(resolved_poi.location.y)
+                    poi_lon = float(resolved_poi.location.x)
+                    distance_km = GoogleDistanceMatrixClient._haversine_distance(
+                        (float(city_center['lat']), float(city_center['lon'])),
+                        (poi_lat, poi_lon),
+                    )
+                    if distance_km > 80:
+                        unresolved.append(suggestion)
+                        if cls._should_include_ai_debug():
+                            debug_items.append({'name': name, 'status': 'filtered_out_of_city_radius'})
+                        continue
+                except Exception:
+                    pass
+
+            if not cls._is_poi_suitable_for_itinerary(resolved_poi, interests):
+                if cls._should_include_ai_debug():
+                    debug_items.append({'name': name, 'status': 'filtered_unsuitable'})
+                continue
+
+            if resolved_poi.id in seen_ids:
+                if cls._should_include_ai_debug():
+                    debug_items.append({'name': name, 'status': 'duplicate'})
+                continue
+
+            seen_ids.add(resolved_poi.id)
+            resolved.append(resolved_poi)
+            if cls._should_include_ai_debug():
+                debug_items.append({'name': name, 'status': 'resolved', 'source': resolution_source, 'poi_id': str(resolved_poi.id)})
+
+        result = {
+            'resolved_pois': resolved,
+            'unresolved_suggestions': unresolved,
+            'reason': 'ok' if resolved else 'no_verified_candidates',
+        }
+        if cls._should_include_ai_debug():
+            result['resolver_ai_debug'] = {'items': debug_items}
+        return result
+
+    @classmethod
+    def _deduplicate_ai_day_plans(cls, days_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Post-process AI output to guarantee no POI appears more than once across all days.
+        This is a safety net to ensure the AI follows the no-repeat rule.
+        """
+        if not isinstance(days_data, list):
+            return []
+        
+        seen_ids = set()
+        deduplicated_days = []
+        
+        for day_item in days_data:
+            if not isinstance(day_item, dict):
+                continue
+            
+            # Get the raw candidate IDs for this day
+            raw_ids = day_item.get('poi_candidate_ids', [])
+            if not isinstance(raw_ids, list):
+                # Fallback for older format
+                raw_ids = []
+                pois = day_item.get('pois', [])
+                if isinstance(pois, list):
+                    for poi_entry in pois:
+                        if isinstance(poi_entry, dict) and 'candidate_id' in poi_entry:
+                            raw_ids.append(str(poi_entry['candidate_id']).strip())
+                        elif isinstance(poi_entry, str):
+                            raw_ids.append(str(poi_entry).strip())
+            
+            # Filter out any duplicate IDs
+            unique_ids_for_day = []
+            for candidate_id in raw_ids:
+                candidate_id_str = str(candidate_id).strip()
+                if not candidate_id_str:
+                    continue
+                # Skip if already used in any previous day
+                if candidate_id_str in seen_ids:
+                    continue
+                # Skip if already in this day's list
+                if candidate_id_str in unique_ids_for_day:
+                    continue
+                
+                unique_ids_for_day.append(candidate_id_str)
+                seen_ids.add(candidate_id_str)
+            
+            # Create deduplicated day item
+            deduplicated_day = {
+                'day': day_item.get('day', len(deduplicated_days) + 1),
+                'location': day_item.get('location', ''),
+                'focus': day_item.get('focus', ''),
+                'poi_candidate_ids': unique_ids_for_day,
+            }
+            deduplicated_days.append(deduplicated_day)
+        
+        return deduplicated_days
 
     @classmethod
     def _plan_with_ai(
@@ -1322,33 +1527,28 @@ Schema:
       "day": 1,
       "location": "string",
       "focus": "string",
-      "pois": [
-        {{
-          "source": "candidate" or "new",
-          "candidate_id": "uuid-string",
-          "name": "string",
-          "address": "string",
-          "latitude": 0.0,
-          "longitude": 0.0,
-          "reason": "string"
-        }}
-      ]
+      "poi_candidate_ids": ["uuid-string"]
     }}
   ]
 }}
 
-Rules:
+CRITICAL RULES (MUST FOLLOW - NO EXCEPTIONS):
+1. ABSOLUTELY NO POI can be used more than once across the entire {duration_days}-day itinerary.
+2. Track all POI ids you use to ensure ZERO repetition across days.
+3. Each day should have unique POIs - no duplicate ids across day arrays.
+4. Do NOT repeat a POI inside the same day either.
+5. If you cannot fill all {stops_per_day} slots per day without repeating, leave slots empty - do NOT repeat POIs.
+
+Instructions:
 - Return exactly {duration_days} day objects.
-- Return exactly {stops_per_day} pois per day.
-- Prefer source="candidate" whenever a candidate fits well.
-- Use source="new" only when a strong, real, city-specific POI is missing from candidates.
-- For source="candidate", candidate_id must be one of the provided candidate_pois IDs exactly as a string.
-- For source="new", omit candidate_id or set it to null.
-- Never invent fake POIs.
+- Aim for exactly {stops_per_day} unique candidate ids per day.
+- Use ONLY candidate ids from the provided candidate_pois list.
+- Do NOT invent new POIs.
+- Do NOT return addresses, coordinates, reasons, or any extra fields.
 - Keep day locations aligned with the provided daily_locations.
+- Maximize coverage and variety across the full trip.
 - Allowed top-level keys: daily_themes, days.
-- Allowed day keys: day, location, focus, pois.
-- Allowed poi keys: source, candidate_id, name, address, latitude, longitude, reason.
+- Allowed day keys: day, location, focus, poi_candidate_ids.
 """
 
         user_payload = {
@@ -1408,16 +1608,25 @@ Rules:
                 str(raw_response or '')[:220].replace('\n', ' '),
                 str(retry_raw or '')[:220].replace('\n', ' '),
             )
-            return {
-                'reason': 'invalid_ai_output',
-                'raw_response': raw_response,
-                'retry_raw_response': retry_raw,
-                'parsed_response': parsed if isinstance(parsed, dict) else {},
-            }
+            result = {'reason': 'invalid_ai_output'}
+            if cls._should_include_ai_debug():
+                result.update(
+                    {
+                        'raw_response': raw_response,
+                        'retry_raw_response': retry_raw,
+                        'parsed_response': parsed if isinstance(parsed, dict) else {},
+                    }
+                )
+            return result
+
+        # Deduplicate AI output to guarantee no POI appears more than once
+        days_data = cls._deduplicate_ai_day_plans(days_data)
 
         selected_pois: List[POI] = []
         selected_ids = set()
+        globally_used_ids = set()
         day_plans: List[Dict[str, Any]] = []
+        duplicate_debug: List[Dict[str, Any]] = []
 
         def _append_selected(poi: POI):
             if poi.id in selected_ids or len(selected_pois) >= max_stops:
@@ -1425,59 +1634,66 @@ Rules:
             selected_pois.append(poi)
             selected_ids.add(poi.id)
 
+        def _rank_fillers_for_day(day_index: int, day_item: Dict[str, Any], *, exclude_ids: set, allow_global_reuse: bool) -> List[POI]:
+            location_hint = str(day_item.get('location') or daily_locations[day_index]['location'] or city).strip()
+            ranked_for_day = cls._rank_pois(ranked_pois, interests + [location_hint])
+            if allow_global_reuse:
+                return [poi for poi in ranked_for_day if poi.id not in exclude_ids]
+            return [poi for poi in ranked_for_day if poi.id not in exclude_ids and poi.id not in globally_used_ids]
+
+        unique_capacity = len({poi.id for poi in ranked_pois})
+        needs_reuse = unique_capacity < max_stops
+
         for day_index in range(duration_days):
             day_item = days_data[day_index] if day_index < len(days_data) and isinstance(days_data[day_index], dict) else {}
-            poi_entries = day_item.get('pois') if isinstance(day_item.get('pois'), list) else []
+
+            raw_candidate_ids = day_item.get('poi_candidate_ids')
+            if not isinstance(raw_candidate_ids, list):
+                # Backward compatibility for older prompt/output formats.
+                poi_entries = day_item.get('pois') if isinstance(day_item.get('pois'), list) else []
+                raw_candidate_ids = []
+                for poi_entry in poi_entries:
+                    if isinstance(poi_entry, dict) and poi_entry.get('candidate_id') is not None:
+                        raw_candidate_ids.append(str(poi_entry.get('candidate_id')).strip())
+                    elif isinstance(poi_entry, str):
+                        raw_candidate_ids.append(poi_entry.strip())
+
             resolved_day_pois: List[POI] = []
             resolved_day_ids = set()
 
-            for poi_entry in poi_entries[:stops_per_day]:
-                if not isinstance(poi_entry, dict):
+            for candidate_id in raw_candidate_ids[:stops_per_day]:
+                matched_poi = candidate_map_by_id.get(str(candidate_id).strip())
+                if matched_poi is None:
                     continue
-
-                source = cls._normalize_text(poi_entry.get('source') or '')
-                name = str(poi_entry.get('name') or '').strip()
-                matched_poi = None
-
-                if source == 'candidate' and poi_entry.get('candidate_id') is not None:
-                    matched_poi = candidate_map_by_id.get(str(poi_entry.get('candidate_id')).strip())
-
-                if matched_poi is None and name:
-                    matched_poi = candidate_map_by_name.get(cls._normalize_text(name))
-
-                if matched_poi is None and name:
-                    fuzzy_matches = cls._match_suggested_names_to_pois([name], candidate_pool)
-                    matched_poi = fuzzy_matches[0] if fuzzy_matches else None
-
-                if matched_poi is None and name:
-                    created = cls._upsert_ai_suggested_poi(
-                        city=city,
-                        suggestion={
-                            'name': name,
-                            'address': str(poi_entry.get('address') or '').strip(),
-                            'latitude': poi_entry.get('latitude'),
-                            'longitude': poi_entry.get('longitude'),
-                            'reason': str(poi_entry.get('reason') or day_item.get('focus') or '').strip(),
-                            'day': day_item.get('day') or (day_index + 1),
-                        },
-                        interests=interests,
-                    )
-                    if created is not None:
-                        matched_poi = created
-
-                if matched_poi is None or matched_poi.id in resolved_day_ids:
+                if matched_poi.id in resolved_day_ids:
+                    if cls._should_include_ai_debug():
+                        duplicate_debug.append({'day': day_index + 1, 'candidate_id': str(candidate_id), 'status': 'duplicate_within_day_from_ai'})
+                    continue
+                if matched_poi.id in globally_used_ids:
+                    if cls._should_include_ai_debug():
+                        duplicate_debug.append({'day': day_index + 1, 'candidate_id': str(candidate_id), 'status': 'duplicate_across_days_from_ai'})
                     continue
 
                 resolved_day_pois.append(matched_poi)
                 resolved_day_ids.add(matched_poi.id)
+                globally_used_ids.add(matched_poi.id)
                 _append_selected(matched_poi)
 
             if len(resolved_day_pois) < stops_per_day:
-                location_hint = str(day_item.get('location') or daily_locations[day_index]['location'] or city).strip()
-                filler_ranked = cls._rank_pois(
-                    [poi for poi in ranked_pois if poi.id not in resolved_day_ids],
-                    interests + [location_hint],
-                )
+                filler_ranked = _rank_fillers_for_day(day_index, day_item, exclude_ids=resolved_day_ids, allow_global_reuse=False)
+                for poi in filler_ranked:
+                    if len(resolved_day_pois) >= stops_per_day:
+                        break
+                    if poi.id in resolved_day_ids or poi.id in globally_used_ids:
+                        continue
+                    resolved_day_pois.append(poi)
+                    resolved_day_ids.add(poi.id)
+                    globally_used_ids.add(poi.id)
+                    _append_selected(poi)
+
+            # Last-resort fallback only when there are not enough unique candidates for all slots.
+            if len(resolved_day_pois) < stops_per_day and needs_reuse:
+                filler_ranked = _rank_fillers_for_day(day_index, day_item, exclude_ids=resolved_day_ids, allow_global_reuse=True)
                 for poi in filler_ranked:
                     if len(resolved_day_pois) >= stops_per_day:
                         break
@@ -1486,6 +1702,8 @@ Rules:
                     resolved_day_pois.append(poi)
                     resolved_day_ids.add(poi.id)
                     _append_selected(poi)
+                    if cls._should_include_ai_debug():
+                        duplicate_debug.append({'day': day_index + 1, 'candidate_id': str(poi.id), 'status': 'last_resort_reuse'})
 
             day_plans.append(
                 {
@@ -1509,15 +1727,27 @@ Rules:
         if not isinstance(daily_themes, list):
             daily_themes = []
 
-        return {
+        result = {
             'selected_pois': selected_pois[:max_stops],
             'daily_themes': [str(item).strip() for item in daily_themes if str(item).strip()],
             'day_plans': day_plans,
             'reason': 'ok',
-            'raw_response': raw_response,
-            'retry_raw_response': retry_raw,
-            'parsed_response': parsed,
         }
+        if cls._should_include_ai_debug():
+            result.update(
+                {
+                    'raw_response': raw_response,
+                    'retry_raw_response': retry_raw,
+                    'parsed_response': parsed,
+                    'duplicate_control_debug': {
+                        'unique_candidate_capacity': unique_capacity,
+                        'required_slots': max_stops,
+                        'needs_reuse': needs_reuse,
+                        'events': duplicate_debug,
+                    },
+                }
+            )
+        return result
 
     @staticmethod
     def _map_external_to_category(place_class: str, place_type: str) -> str:
@@ -1748,22 +1978,46 @@ Rules:
         day_locations: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         max_stops = duration_days * stops_per_day
-        candidates = self._get_city_candidates(city, min_count=max(8, max_stops))
 
-        if not candidates:
-            raise ValueError(f"No POIs found for city '{city}'.")
+        suggestion_result = self._suggest_pois_with_ai(
+            city=city,
+            duration_days=duration_days,
+            interests=interests,
+            stops_per_day=stops_per_day,
+            daily_locations=day_locations,
+        )
+        suggested_pois = suggestion_result.get('suggested_pois') or []
 
-        if min_rating is not None:
-            candidates = [
-                poi for poi in candidates
-                if float(poi.average_rating or 0.0) >= float(min_rating)
-            ]
-            if not candidates:
-                raise ValueError(f"No POIs found for city '{city}' with rating >= {float(min_rating):g}.")
+        resolution_result = self._resolve_ai_suggested_pois(
+            city=city,
+            suggestions=suggested_pois,
+            interests=interests,
+            max_stops=max_stops,
+            min_rating=min_rating,
+        )
+        verified_pois = resolution_result.get('resolved_pois') or []
 
-        filtered_candidates = [poi for poi in candidates if self._is_poi_suitable_for_itinerary(poi, interests)]
-        ranking_pool = filtered_candidates if len(filtered_candidates) >= max(4, min(max_stops, 10)) else candidates
-        ranked_pois = self._rank_pois(ranking_pool, interests)
+        if len(verified_pois) < max_stops:
+            db_candidates = self._get_city_candidates(city, min_count=max(8, max_stops))
+            if min_rating is not None:
+                db_candidates = [
+                    poi for poi in db_candidates
+                    if float(poi.average_rating or 0.0) >= float(min_rating)
+                ]
+            db_candidates = [poi for poi in db_candidates if self._is_poi_suitable_for_itinerary(poi, interests)]
+            existing_ids = {poi.id for poi in verified_pois}
+            for poi in self._rank_pois(db_candidates, interests):
+                if poi.id in existing_ids:
+                    continue
+                verified_pois.append(poi)
+                existing_ids.add(poi.id)
+                if len(verified_pois) >= max_stops:
+                    break
+
+        if not verified_pois:
+            raise ValueError('No POIs could be verified for the selected city/interests.')
+
+        ranked_pois = self._rank_pois(verified_pois, interests)
         ai_plan = self._plan_with_ai(
             city=city,
             duration_days=duration_days,
@@ -1774,13 +2028,13 @@ Rules:
             daily_locations=day_locations,
         )
         selected_pois = ai_plan.get('selected_pois') or self._select_diverse_pois(ranked_pois, max_stops, interests)
-        planning_source = 'ai' if ai_plan.get('selected_pois') else 'rule_based'
-        daily_themes = ai_plan.get('daily_themes') or []
+        planning_source = 'ai_verified_candidates' if ai_plan.get('selected_pois') else 'rule_based_verified_candidates'
+        daily_themes = ai_plan.get('daily_themes') or suggestion_result.get('daily_themes') or []
         planning_source_reason = ai_plan.get('reason', 'fallback_rule_based')
         ai_day_plans = ai_plan.get('day_plans') or []
 
         if not selected_pois:
-            raise ValueError('No POIs matched the selected city/interests.')
+            raise ValueError('No POIs matched the selected city/interests after verification.')
 
         start_dt = datetime.combine(start_date, time(hour=9, minute=0))
         end_dt = datetime.combine(start_date + timedelta(days=duration_days - 1), time(hour=20, minute=0))
@@ -1857,15 +2111,29 @@ Rules:
                 }
             )
 
-        return {
+        response = {
             'itinerary': itinerary,
             'selected_pois_count': len(selected_pois),
-            'candidate_pois_count': len(candidates),
+            'candidate_pois_count': len(ranked_pois),
+            'verified_pois_count': len(verified_pois),
+            'suggested_pois_count': len(suggested_pois),
             'day_plan': day_plan,
             'reused_draft': False,
             'planning_source': planning_source,
             'planning_source_reason': planning_source_reason,
-            'ai_raw_response': ai_plan.get('raw_response', ''),
-            'ai_retry_raw_response': ai_plan.get('retry_raw_response', ''),
-            'ai_parsed_response': ai_plan.get('parsed_response', {}),
         }
+        if self._should_include_ai_debug():
+            response.update(
+                {
+                    'ai_raw_response': ai_plan.get('raw_response', ''),
+                    'ai_retry_raw_response': ai_plan.get('retry_raw_response', ''),
+                    'ai_parsed_response': ai_plan.get('parsed_response', {}),
+                }
+            )
+            if suggestion_result.get('suggestions_ai_debug'):
+                response['ai_suggestions_debug'] = suggestion_result.get('suggestions_ai_debug')
+            if resolution_result.get('resolver_ai_debug'):
+                response['ai_resolution_debug'] = resolution_result.get('resolver_ai_debug')
+            if resolution_result.get('unresolved_suggestions'):
+                response['unresolved_ai_suggestions'] = resolution_result.get('unresolved_suggestions')
+        return response

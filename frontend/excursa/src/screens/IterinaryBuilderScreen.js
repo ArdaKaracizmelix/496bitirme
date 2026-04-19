@@ -21,7 +21,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import useTripStore from '../store/tripStore';
-import RouteManager from '../services/RouteManager';
 import locationService from '../services/locationService';
 import useAuthStore from '../store/authStore';
 import TripService from '../services/TripService';
@@ -61,7 +60,6 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
   // Local State
   const [tripTitle, setTripTitle] = useState('');
   const [tripDate, setTripDate] = useState('');
-  const [transportMode, setTransportMode] = useState('DRIVING');
   const [showPOISelector, setShowPOISelector] = useState(false);
   const [availablePOIs, setAvailablePOIs] = useState([]);
   const [draggedStopId, setDraggedStopId] = useState(null);
@@ -84,7 +82,6 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
     clearCurrentTrip();
     setTripTitle('');
     setTripDate('');
-    setTransportMode('DRIVING');
     setCityQuery('');
     setSelectedCity('');
     setCitySuggestions([]);
@@ -99,7 +96,6 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
     if (tripId && currentTrip) {
       setTripTitle(currentTrip.title || '');
       setTripDate(currentTrip.start_date ? currentTrip.start_date.slice(0, 10) : '');
-      setTransportMode(currentTrip.transport_mode || 'DRIVING');
     }
   }, [tripId, currentTrip]);
 
@@ -190,20 +186,7 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
             .filter(Boolean)
         : [];
 
-      // 1) Warm up city POIs. This is best-effort: the itinerary endpoint has
-      // its own fallback pipeline, so a slow external Places sync must not block
-      // AI route creation on mobile networks.
-      try {
-        await locationService.generatePOIsForCity(city, userInterests, 20000);
-      } catch (poiError) {
-        const message =
-          poiError?.response?.data?.error ||
-          poiError?.message ||
-          'POI sync skipped';
-        console.warn('City POI pre-sync skipped before AI route generation:', message);
-      }
-
-      // 2) Generate itinerary from now-available city POIs.
+      // Generate itinerary directly. Backend handles candidate hydration/fallbacks.
       const result = await store.generateTripFromPreferences({
         city,
         duration_days: durationDays,
@@ -211,7 +194,6 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
         start_date: tripDate || undefined,
         title: tripTitle.trim() || undefined,
         visibility: 'PRIVATE',
-        transport_mode: transportMode,
         stops_per_day: stopsPerDay,
       });
 
@@ -222,9 +204,6 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
       }
       if (result?.summary?.start_date) {
         setTripDate(result.summary.start_date);
-      }
-      if (result?.itinerary?.transport_mode) {
-        setTransportMode(result.itinerary.transport_mode);
       }
 
       Alert.alert('Başarılı', `Rota oluşturuldu. ${selectedCount} popüler durak eklendi.`);
@@ -241,7 +220,6 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
     aiStopsPerDay,
     tripDate,
     tripTitle,
-    transportMode,
     user,
     store,
   ]);
@@ -387,7 +365,7 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
     const executeOptimize = async () => {
       try {
         const beforeOrder = currentTripStops.map((s) => s.id).join(',');
-        await store.optimizeRoute(transportMode);
+        await store.optimizeRoute();
         const afterOrder = (useTripStore.getState().currentTripStops || [])
           .map((s) => s.id)
           .join(',');
@@ -402,20 +380,18 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
     };
 
     if (Platform.OS === 'web' && typeof globalThis.confirm === 'function') {
-      const confirmed = globalThis.confirm(
-        `Ulaşım modu: ${transportMode}\n\nRota optimize edilsin mi?`
-      );
+      const confirmed = globalThis.confirm('Rota optimize edilsin mi?');
       if (confirmed) {
         executeOptimize();
       }
       return;
     }
 
-    Alert.alert('Rotayı Optimize Et', `Ulaşım modu: ${transportMode}\n\nRota optimize edilsin mi?`, [
+    Alert.alert('Rotayı Optimize Et', 'Rota optimize edilsin mi?', [
       { text: 'İptal', onPress: () => {} },
       { text: 'Optimize Et', onPress: executeOptimize },
     ]);
-  }, [transportMode, currentTripStops, store]);
+  }, [currentTripStops, store]);
 
   /**
    * Handle saving trip
@@ -436,14 +412,12 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
           title: tripTitle.trim(),
           start_date: startDate,
           end_date: endDate.toISOString(),
-          transport_mode: transportMode,
         });
       } else {
         await store.updateCurrentTrip({
           title: tripTitle.trim(),
           start_date: startDate,
           end_date: endDate.toISOString(),
-          transport_mode: transportMode,
         });
       }
 
@@ -457,7 +431,7 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
     } catch (error) {
       Alert.alert('Hata', 'Rota kaydedilemedi');
     }
-  }, [tripTitle, tripDate, currentTripStops, navigation, store, transportMode]);
+  }, [tripTitle, tripDate, currentTripStops, navigation, store]);
 
   const handleShowOnMap = useCallback(() => {
     if (currentTripStops.length === 0) {
@@ -701,35 +675,6 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
           </View>
         )}
 
-        {/* Transport Mode Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Ulaşım Modu</Text>
-          <View style={styles.transportModeGrid}>
-            {['DRIVING', 'WALKING', 'CYCLING'].map((mode) => (
-              <TouchableOpacity
-                key={mode}
-                style={[
-                  styles.transportModeButton,
-                  transportMode === mode && styles.transportModeButtonActive,
-                ]}
-                onPress={() => setTransportMode(mode)}
-              >
-                <Text style={styles.transportModeEmoji}>
-                  {RouteManager.getTransportModeEmoji(mode)}
-                </Text>
-                <Text
-                  style={[
-                    styles.transportModeLabel,
-                    transportMode === mode && styles.transportModeLabelActive,
-                  ]}
-                >
-                  {mode === 'DRIVING' ? 'Araba' : mode === 'WALKING' ? 'Yürüyüş' : 'Bisiklet'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
         {/* Stops Section */}
         <View style={styles.section}>
           <View style={styles.stopsHeader}>
@@ -972,36 +917,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#1a1a2e',
-  },
-  transportModeGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  transportModeButton: {
-    flex: 1,
-    backgroundColor: '#f8f8f8',
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#ddd',
-  },
-  transportModeButtonActive: {
-    backgroundColor: '#1a1a2e',
-    borderColor: '#1a1a2e',
-  },
-  transportModeEmoji: {
-    fontSize: 24,
-    marginBottom: 4,
-  },
-  transportModeLabel: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '600',
-  },
-  transportModeLabelActive: {
-    color: '#fff',
   },
   stopsHeader: {
     flexDirection: 'row',

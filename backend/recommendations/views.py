@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 from recommendations.models import Interaction, Review, InteractionType
 from recommendations.serializers import (
@@ -75,6 +76,17 @@ class ReviewViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user.profile)
+
+    def perform_update(self, serializer):
+        review = serializer.instance
+        if review.user_id != self.request.user.profile.id:
+            raise PermissionDenied("You can only edit your own review.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.user_id != self.request.user.profile.id:
+            raise PermissionDenied("You can only delete your own review.")
+        instance.delete()
 
 
 class GenerateRecommendationsView(APIView):

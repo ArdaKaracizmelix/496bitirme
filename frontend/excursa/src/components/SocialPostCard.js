@@ -8,9 +8,8 @@ import {
   View,
 } from 'react-native';
 import RouteShareCard from './RouteShareCard';
+import AppAvatar from './AppAvatar';
 import { getPostPresentation } from '../utils/routeShareUtils';
-
-const FALLBACK_AVATAR = 'https://i.pravatar.cc/150?img=12';
 
 export default function SocialPostCard({
   post,
@@ -37,10 +36,7 @@ export default function SocialPostCard({
     <View style={styles.card}>
       <View style={styles.header}>
         <Pressable style={styles.author} onPress={() => onUserPress(post)}>
-          <Image
-            source={{ uri: post?.avatar_url || FALLBACK_AVATAR }}
-            style={styles.avatar}
-          />
+          <AppAvatar uri={post?.avatar_url} style={styles.avatar} />
           <View style={styles.authorTextWrap}>
             <Text style={styles.userName} numberOfLines={1}>{userName}</Text>
             <Text style={styles.metaText} numberOfLines={1}>
