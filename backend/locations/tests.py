@@ -68,6 +68,13 @@ class GeoServiceTests(TestCase):
             location=Point(1.0, 0.0),
             category=POI.Category.NATURE
         )
+        # Misclassified legacy data should be hidden from map exploration.
+        self.school_poi = POI.objects.create(
+            name="Sample University Campus",
+            location=Point(0.008, 0.0),
+            category=POI.Category.ENTERTAINMENT,
+            tags=["university", "education"],
+        )
 
     def test_find_nearby(self):
         """Test finding POIs within a specific radius."""
@@ -78,6 +85,7 @@ class GeoServiceTests(TestCase):
         self.assertIn(self.center_poi, results)
         self.assertIn(self.nearby_poi, results)
         self.assertNotIn(self.far_poi, results)
+        self.assertNotIn(self.school_poi, results)
 
     def test_find_in_viewport(self):
         """Test finding POIs within a map bounding box."""

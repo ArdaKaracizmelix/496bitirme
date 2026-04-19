@@ -10,6 +10,7 @@ from django.contrib.gis.measure import Distance
 from django.db.models import QuerySet, Case, When, Value, IntegerField
 from django.db.models import Q
 from django.conf import settings
+from user.poi_categorization import categorize_google_place, map_derived_category_to_poi_category
 from .models import POI
 
 
@@ -19,6 +20,31 @@ class GeoService:
     Isolates direct database queries ensuring controllers/views interact 
     with a clean API rather than raw ORM/SQL calls.
     """
+
+    NON_TOURISM_TAGS = {
+        'school',
+        'primary_school',
+        'secondary_school',
+        'high_school',
+        'middle_school',
+        'preschool',
+        'kindergarten',
+        'university',
+        'college',
+        'college_or_university',
+        'academy',
+        'campus',
+        'education',
+        'educational_institution',
+        'language_school',
+        'music_school',
+        'driving_school',
+        'trade_school',
+        'adult_education_school',
+        'academic_department',
+        'university_department',
+        'research_institute',
+    }
     
     @staticmethod
     def normalize_interest_values(interests: List[str]) -> List[str]:
@@ -36,15 +62,73 @@ class GeoService:
         return query
 
     @staticmethod
+    def _build_non_tourism_tag_query() -> Optional[Q]:
+        query = None
+        for tag in GeoService.NON_TOURISM_TAGS:
+            condition = Q(tags__contains=[tag])
+            query = condition if query is None else (query | condition)
+        return query
+
+    @staticmethod
+    def _exclude_non_tourism_pois(queryset: QuerySet) -> QuerySet:
+        tag_query = GeoService._build_non_tourism_tag_query()
+        if tag_query is None:
+            return queryset
+        return queryset.exclude(tag_query)
+
+    @staticmethod
     def _map_interests_to_categories(interests: List[str]) -> List[str]:
         """
         Map user interest labels/types to internal POI category enums.
         """
         category_map = {
-            'HISTORICAL': {'historical', 'history', 'museum', 'monument', 'castle', 'cultural_landmark', 'historical_landmark', 'art_museum'},
+            'HISTORICAL': {
+                'historical',
+                'history',
+                'museum',
+                'monument',
+                'castle',
+                'cultural_landmark',
+                'historical_landmark',
+                'art_museum',
+                'culture',
+                'art_gallery',
+                'library',
+                'tourist_attraction',
+            },
             'NATURE': {'nature', 'park', 'national_park', 'state_park', 'beach', 'lake', 'mountain', 'woods', 'garden', 'botanical_garden', 'hiking_area', 'zoo', 'aquarium'},
-            'FOOD': {'food', 'restaurant', 'cafe', 'bar', 'bakery', 'coffee_shop', 'meal_takeaway', 'meal_delivery', 'ice_cream_shop'},
-            'ENTERTAINMENT': {'entertainment', 'movie_theater', 'night_club', 'amusement_park', 'stadium', 'shopping_mall', 'theater', 'performing_arts_theater'},
+            'FOOD': {
+                'food',
+                'food_and_drink',
+                'restaurant',
+                'cafe',
+                'bar',
+                'bakery',
+                'coffee_shop',
+                'meal_takeaway',
+                'meal_delivery',
+                'ice_cream_shop',
+            },
+            'ENTERTAINMENT': {
+                'entertainment',
+                'entertainment_and_recreation',
+                'movie_theater',
+                'night_club',
+                'amusement_park',
+                'stadium',
+                'shopping',
+                'shopping_mall',
+                'store',
+                'market',
+                'book_store',
+                'clothing_store',
+                'gym',
+                'spa',
+                'wellness',
+                'wellness_center',
+                'theater',
+                'performing_arts_theater',
+            },
         }
 
         normalized = set(GeoService.normalize_interest_values(interests))
@@ -73,6 +157,7 @@ class GeoService:
         queryset = POI.objects.filter(
             location__distance_lte=(center, Distance(m=radius_m))
         )
+        queryset = GeoService._exclude_non_tourism_pois(queryset)
         
         # Apply optional filters
         if 'category' in filters:
@@ -124,7 +209,8 @@ class GeoService:
         Returns:
             QuerySet of POI objects within the bounding box
         """
-        return POI.objects.filter(location__contained=bbox)
+        queryset = POI.objects.filter(location__contained=bbox)
+        return GeoService._exclude_non_tourism_pois(queryset)
     
     @staticmethod
     def get_cluster_aggregates(bbox: Polygon, zoom: int) -> List[Dict]:
@@ -270,6 +356,17 @@ class ExternalSyncService:
             poi = self.upsert_poi(dto)
             if poi:
                 new_count += 1
+
+        # Fallback: enrich from OSM when provider APIs are unavailable or sparse.
+        if new_count < 8:
+            osm_places = self._fetch_osm_places(lat, lon)
+            for place_data in osm_places:
+                dto = self._parse_osm_place(place_data)
+                if not dto:
+                    continue
+                poi = self.upsert_poi(dto)
+                if poi:
+                    new_count += 1
         
         return new_count
     
@@ -286,15 +383,33 @@ class ExternalSyncService:
             POI instance, or None if update failed
         """
         try:
+            normalized_tags = self._normalize_tags(data.tags)
+            classification = categorize_google_place(
+                [data.category] + normalized_tags,
+                data.name,
+            )
+            if not classification.get('is_meaningful_poi'):
+                return None
+
+            mapped_category = map_derived_category_to_poi_category(
+                classification.get('derived_category'),
+                fallback=None,
+            )
+            if not mapped_category:
+                return None
+
             poi, created = POI.objects.update_or_create(
                 external_id=data.external_id,
                 defaults={
                     'name': data.name,
                     'address': data.address,
                     'location': Point(data.lon, data.lat),
-                    'category': self.map_category(data.category),
-                    'metadata': data.metadata,
-                    'tags': self._normalize_tags(data.tags),
+                    'category': mapped_category,
+                    'metadata': {
+                        **(data.metadata or {}),
+                        'categorization': classification,
+                    },
+                    'tags': self._normalize_tags(normalized_tags + classification.get('effective_types', [])),
                 }
             )
             return poi if created else None
@@ -333,7 +448,7 @@ class ExternalSyncService:
             print(f"Error refreshing metadata for POI {poi.id}: {str(e)}")
             return False
     
-    def map_category(self, external_cat: str) -> str:
+    def map_category(self, external_cat: str, tags: Optional[List[str]] = None, name: str = "") -> str:
         """
         Normalizes external category strings to internal Enum values.
         
@@ -344,19 +459,12 @@ class ExternalSyncService:
             Internal POI.Category enum value
         """
 
-        # mapping can be expanded as we integrate more APIs and encounter more category variations
-        mapping = {
-            'historical_place': POI.Category.HISTORICAL,
-            'monument': POI.Category.HISTORICAL,
-            'museum': POI.Category.HISTORICAL,
-            'park': POI.Category.NATURE,
-            'natural_feature': POI.Category.NATURE,
-            'restaurant': POI.Category.FOOD,
-            'cafe': POI.Category.FOOD,
-            'amusement_park': POI.Category.ENTERTAINMENT,
-            'movie_theater': POI.Category.ENTERTAINMENT,
-        }
-        return mapping.get(external_cat.lower(), POI.Category.ENTERTAINMENT)
+        classification = categorize_google_place([external_cat] + (tags or []), name)
+        mapped = map_derived_category_to_poi_category(
+            classification.get('derived_category'),
+            fallback=POI.Category.ENTERTAINMENT,
+        )
+        return mapped or POI.Category.ENTERTAINMENT
 
     def _normalize_tags(self, tags: List[str]) -> List[str]:
         normalized = []
@@ -412,6 +520,33 @@ class ExternalSyncService:
         except Exception as e:
             print(f"Error fetching from Foursquare: {str(e)}")
             return []
+
+    def _fetch_osm_places(self, lat: float, lon: float) -> List[Dict]:
+        """Fetch fallback places from OpenStreetMap Overpass."""
+        query = f"""
+[out:json][timeout:20];
+(
+  node(around:4000,{lat},{lon})[amenity~"restaurant|cafe|fast_food|bar|pub|bakery|ice_cream|tea"];
+  way(around:4000,{lat},{lon})[amenity~"restaurant|cafe|fast_food|bar|pub|bakery|ice_cream|tea"];
+  node(around:4000,{lat},{lon})[tourism~"museum|attraction|gallery|viewpoint"];
+  way(around:4000,{lat},{lon})[tourism~"museum|attraction|gallery|viewpoint"];
+  node(around:4000,{lat},{lon})[leisure~"park|garden"];
+  way(around:4000,{lat},{lon})[leisure~"park|garden"];
+);
+out center 120;
+""".strip()
+        try:
+            response = requests.post(
+                'https://overpass-api.de/api/interpreter',
+                data=query,
+                headers={'User-Agent': 'ExcursaPOISync/1.0'},
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json().get('elements', [])
+        except Exception as e:
+            print(f"Error fetching from OSM Overpass: {str(e)}")
+            return []
     
     def _parse_google_place(self, place_data: Dict) -> 'ExternalPlaceDTO':
         """Parse Google Places API response"""
@@ -449,6 +584,68 @@ class ExternalSyncService:
                 'distance': place_data.get('distance'),
             },
             tags=self._normalize_tags(category_tags),
+        )
+
+    def _parse_osm_place(self, place_data: Dict) -> Optional['ExternalPlaceDTO']:
+        """Parse Overpass element into ExternalPlaceDTO."""
+        tags = place_data.get('tags') or {}
+        name = str(tags.get('name') or '').strip()
+        if not name:
+            return None
+
+        place_type = str(place_data.get('type') or '').strip().lower()
+        if place_type == 'node':
+            lat = place_data.get('lat')
+            lon = place_data.get('lon')
+        else:
+            center = place_data.get('center') or {}
+            lat = center.get('lat')
+            lon = center.get('lon')
+
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except (TypeError, ValueError):
+            return None
+
+        amenity = str(tags.get('amenity') or '').strip()
+        tourism = str(tags.get('tourism') or '').strip()
+        leisure = str(tags.get('leisure') or '').strip()
+        category = amenity or tourism or leisure or 'other'
+
+        street_bits = [
+            str(tags.get('addr:street') or '').strip(),
+            str(tags.get('addr:housenumber') or '').strip(),
+        ]
+        locality_bits = [
+            str(tags.get('addr:suburb') or tags.get('addr:neighbourhood') or '').strip(),
+            str(tags.get('addr:city') or tags.get('addr:town') or tags.get('addr:village') or '').strip(),
+        ]
+        address_parts = [' '.join([bit for bit in street_bits if bit]).strip()] + [
+            bit for bit in locality_bits if bit
+        ]
+        address = ', '.join([part for part in address_parts if part]) or name
+
+        element_id = place_data.get('id')
+        if element_id is None:
+            return None
+        external_id = f"osm-{place_type}-{element_id}"
+
+        tag_values = [amenity, tourism, leisure, str(tags.get('cuisine') or '').strip()]
+
+        return ExternalPlaceDTO(
+            external_id=external_id,
+            name=name,
+            address=address,
+            lat=lat,
+            lon=lon,
+            category=category,
+            metadata={
+                'source': 'osm_overpass',
+                'osm_type': place_type,
+                'osm_id': element_id,
+            },
+            tags=self._normalize_tags(tag_values),
         )
     
     # function still needs to be implemented 

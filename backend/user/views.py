@@ -13,7 +13,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import FollowRelation, UserProfile
-from .interest_service import InterestService
 from .serializers import (
     FollowListProfileSerializer,
     FollowActionSerializer,
@@ -29,6 +28,10 @@ from .services import (
     generate_email_verification_token,
     send_verification_email,
     validate_email_verification_token,
+)
+from .poi_categorization import (
+    categorize_google_place as shared_categorize_google_place,
+    is_meaningful_poi as shared_is_meaningful_poi,
 )
 
 User = get_user_model()
@@ -257,6 +260,181 @@ GOOGLE_TABLE_A_STATIC_TYPES = {
     "truck_stop",
 }
 
+# Types that are usually meaningful as itinerary/sightseeing POIs.
+MEANINGFUL_POI_ALLOW_TYPES = {
+    "tourist_attraction", "museum", "art_gallery", "art_museum", "art_studio",
+    "historical_landmark", "historical_place", "monument", "castle", "cultural_landmark",
+    "performing_arts_theater", "cultural_center", "opera_house", "auditorium",
+    "park", "city_park", "national_park", "state_park", "botanical_garden", "garden",
+    "hiking_area", "beach", "lake", "river", "woods", "nature_preserve", "scenic_spot",
+    "zoo", "aquarium", "observation_deck", "plaza", "visitor_center",
+    "restaurant", "cafe", "bakery", "coffee_shop", "ice_cream_shop", "tea_house",
+    "market", "farmers_market", "flea_market", "shopping_mall", "book_store", "clothing_store",
+    "movie_theater", "amusement_park", "night_club", "stadium", "concert_hall",
+    "live_music_venue", "community_center", "church", "mosque", "synagogue", "buddhist_temple",
+    "hindu_temple", "tourist_information_center",
+}
+
+# Types that should almost never become destination POIs in a travel itinerary.
+MEANINGFUL_POI_BLOCK_TYPES = {
+    "atm", "bank", "accounting", "hospital", "general_hospital", "pharmacy", "drugstore",
+    "doctor", "dentist", "physiotherapist", "medical_center", "medical_clinic", "medical_lab",
+    "parking", "parking_garage", "parking_lot", "rest_stop",
+    "airport", "airstrip", "bus_station", "bus_stop", "train_station", "train_ticket_office",
+    "subway_station", "taxi_stand", "taxi_service", "transit_station", "transit_stop",
+    "transit_depot", "light_rail_station", "tram_stop", "park_and_ride", "transportation_service",
+    "locality", "country", "postal_code", "administrative_area_level_1", "administrative_area_level_2",
+    "school_district", "school", "primary_school", "secondary_school", "preschool", "university",
+    "research_institute", "academic_department", "government_office", "local_government_office",
+    "city_hall", "courthouse", "embassy", "fire_station", "police", "post_office",
+    "corporate_office", "business_center", "coworking_space", "supplier", "manufacturer",
+    "service", "storage", "moving_company", "roofing_contractor", "employment_agency",
+}
+
+# Generic types that should be ignored when deciding the final category.
+GENERIC_GOOGLE_TYPES = {
+    "point_of_interest", "establishment", "premise", "route", "street_address",
+    "subpremise", "plus_code", "floor", "intersection",
+}
+
+POI_CATEGORY_RULES = {
+    "HISTORICAL": {
+        "strong": {
+            "historical_landmark", "historical_place", "monument", "museum", "history_museum",
+            "castle", "cultural_landmark", "art_museum",
+        },
+        "weak": {
+            "tourist_attraction", "church", "mosque", "synagogue", "buddhist_temple",
+            "hindu_temple", "library", "plaza", "visitor_center",
+        },
+    },
+    "CULTURE": {
+        "strong": {
+            "art_gallery", "performing_arts_theater", "cultural_center", "opera_house",
+            "concert_hall", "auditorium", "art_studio",
+        },
+        "weak": {"community_center", "tourist_information_center", "tourist_attraction"},
+    },
+    "NATURE": {
+        "strong": {
+            "park", "city_park", "national_park", "state_park", "botanical_garden",
+            "hiking_area", "beach", "lake", "river", "woods", "nature_preserve",
+        },
+        "weak": {"garden", "scenic_spot", "zoo", "aquarium", "observation_deck"},
+    },
+    "FOOD": {
+        "strong": {"restaurant", "cafe", "bakery", "coffee_shop"},
+        "weak": {
+            "bar", "ice_cream_shop", "tea_house", "meal_takeaway", "meal_delivery",
+            "food_court", "market", "farmers_market",
+        },
+    },
+    "ENTERTAINMENT": {
+        "strong": {
+            "movie_theater", "amusement_park", "night_club", "stadium", "live_music_venue",
+            "concert_hall",
+        },
+        "weak": {"tourist_attraction", "plaza", "event_venue", "community_center"},
+    },
+    "SHOPPING": {
+        "strong": {"shopping_mall", "market", "book_store", "clothing_store", "farmers_market", "flea_market"},
+        "weak": {"gift_shop", "department_store", "store"},
+    },
+    "WELLNESS": {
+        "strong": {"spa", "wellness_center", "yoga_studio", "massage_spa", "sauna"},
+        "weak": {"gym", "fitness_center", "public_bath"},
+    },
+    "LODGING": {
+        "strong": {"lodging", "hotel", "hostel", "resort_hotel", "motel", "guest_house"},
+        "weak": {"campground", "bed_and_breakfast", "inn"},
+    },
+    "TRANSPORTATION": {
+        "strong": {"airport", "bus_station", "train_station", "subway_station", "transit_station"},
+        "weak": {"taxi_stand", "tram_stop", "bus_stop", "ferry_terminal"},
+    },
+}
+
+PRIMARY_TYPE_PRIORITY = [
+    # Historical / Culture
+    "historical_landmark", "monument", "museum", "history_museum", "castle", "cultural_landmark",
+    "art_gallery", "art_museum", "performing_arts_theater", "cultural_center", "opera_house",
+    # Nature
+    "national_park", "state_park", "botanical_garden", "park", "city_park", "hiking_area",
+    "beach", "lake", "nature_preserve", "woods", "garden", "scenic_spot",
+    # Food
+    "restaurant", "cafe", "bakery", "coffee_shop", "bar", "ice_cream_shop",
+    # Entertainment / Shopping
+    "movie_theater", "amusement_park", "night_club", "stadium", "shopping_mall", "market",
+    "book_store", "clothing_store", "farmers_market", "flea_market",
+    # Generic but still visitable
+    "tourist_attraction", "plaza", "visitor_center", "church", "mosque", "synagogue",
+]
+
+
+def _normalize_google_types(types) -> list[str]:
+    normalized = []
+    seen = set()
+    for raw in types or []:
+        value = re.sub(r"\s+", "_", str(raw or "").strip().lower())
+        value = value.replace("-", "_")
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def _extract_name_based_type_hints(name: str) -> set[str]:
+    lowered = str(name or "").strip().lower()
+    hints = set()
+    keyword_map = {
+        "museum": "museum",
+        "palace": "castle",
+        "castle": "castle",
+        "tower": "historical_landmark",
+        "park": "park",
+        "garden": "garden",
+        "beach": "beach",
+        "cafe": "cafe",
+        "coffee": "coffee_shop",
+        "bakery": "bakery",
+        "restaurant": "restaurant",
+        "market": "market",
+        "square": "plaza",
+        "mosque": "mosque",
+        "church": "church",
+        "spa": "spa",
+        "hotel": "hotel",
+    }
+    for token, inferred_type in keyword_map.items():
+        if token in lowered:
+            hints.add(inferred_type)
+    return hints
+
+
+def _pick_primary_google_type(types: list[str]) -> str | None:
+    if not types:
+        return None
+    normalized = _normalize_google_types(types)
+    for preferred in PRIMARY_TYPE_PRIORITY:
+        if preferred in normalized:
+            return preferred
+    for candidate in normalized:
+        if candidate not in GENERIC_GOOGLE_TYPES:
+            return candidate
+    return normalized[0] if normalized else None
+
+
+def is_meaningful_poi(types, name: str = "") -> bool:
+    return shared_is_meaningful_poi(types, name)
+
+
+def categorize_google_place(types, name: str = "") -> dict:
+    return shared_categorize_google_place(types, name)
+
+
+
+
 
 def build_user_payload(profile: UserProfile) -> dict:
     user = profile.user
@@ -300,17 +478,60 @@ def _interest_catalog():
     index = 1
     for name in group_names + type_names:
         children = GOOGLE_INTEREST_GROUPS.get(name, [])
+        child_payload = [
+            {
+                "name": child,
+                "key": child,
+                "title": _format_interest_label(child),
+                "kind": "type",
+            }
+            for child in children
+        ]
         catalog.append(
             {
                 "id": index,
                 "name": name,
+                "key": str(name or "").lower(),
                 "title": _format_interest_label(name),
-                "kind": "group" if children else "type",
-                "children": children,
+                "kind": "group" if child_payload else "type",
+                "children": child_payload,
             }
         )
         index += 1
     return catalog
+
+
+def _interest_catalog_groups():
+    return [item for item in _interest_catalog() if item.get("kind") == "group"]
+
+
+def _resolve_selected_interests(raw_interest_ids):
+    if not isinstance(raw_interest_ids, list) or not raw_interest_ids:
+        return []
+
+    interests = _interest_catalog_groups()
+    by_id = {item["id"]: item for item in interests}
+    by_name = {str(item.get("name", "")).lower(): item for item in interests}
+    by_key = {str(item.get("key", "")).lower(): item for item in interests}
+
+    selected = []
+    seen = set()
+    for value in raw_interest_ids:
+        entry = None
+        if isinstance(value, int):
+            entry = by_id.get(value)
+        elif isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized.isdigit():
+                entry = by_id.get(int(normalized))
+            else:
+                entry = by_name.get(normalized) or by_key.get(normalized)
+
+        if entry and entry["id"] not in seen:
+            selected.append(entry)
+            seen.add(entry["id"])
+
+    return selected
 
 
 def _fetch_google_table_a_types(include_static: bool = True) -> set[str]:
@@ -727,11 +948,11 @@ class InterestAvailableView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        interests = InterestService().list_available_interests()
+        interests = _interest_catalog_groups()
         return Response(
             {
                 "interests": interests,
-                "source": "database",
+                "source": "google_places",
                 "count": len(interests),
             },
             status=status.HTTP_200_OK,
@@ -742,7 +963,18 @@ class InterestSourceHealthView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(InterestService().get_health(), status=status.HTTP_200_OK)
+        live_table_a_types = _fetch_google_table_a_types(include_static=False)
+        return Response(
+            {
+                "source": "google_places",
+                "active_group_count": len(GOOGLE_INTEREST_GROUPS),
+                "active_type_count": len(_fetch_google_table_a_types(include_static=True)),
+                "live_table_a_count": len(live_table_a_types),
+                "live_fetch_ok": bool(live_table_a_types),
+                "static_fallback_count": len(GOOGLE_TABLE_A_STATIC_TYPES),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class InterestSubmitView(APIView):
@@ -751,12 +983,35 @@ class InterestSubmitView(APIView):
     def post(self, request):
         interest_ids = request.data.get("interest_ids", [])
         profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        interests = InterestService().save_user_interests(profile, interest_ids)
+
+        selected = _resolve_selected_interests(interest_ids)
+        if not selected:
+            return Response(
+                {"detail": "At least one valid interest must be selected"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        preference_keys = []
+        seen_keys = set()
+        for item in selected:
+            group_name = str(item.get("name", "")).strip().lower()
+            if group_name and group_name not in seen_keys:
+                preference_keys.append(group_name)
+                seen_keys.add(group_name)
+
+            for child in item.get("children", []):
+                child_key = str(child.get("key") or child.get("name") or "").strip().lower()
+                if child_key and child_key not in seen_keys:
+                    preference_keys.append(child_key)
+                    seen_keys.add(child_key)
+
+        profile.preferences_vector = {key: 1.0 for key in preference_keys}
+        profile.save(update_fields=["preferences_vector"])
         preference_keys = list((profile.preferences_vector or {}).keys())
 
         return Response(
             {
-                "interests": interests,
+                "interests": selected,
                 "preference_keys": preference_keys,
                 "message": "Interests updated successfully",
             },

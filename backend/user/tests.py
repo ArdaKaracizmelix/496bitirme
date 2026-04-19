@@ -6,9 +6,37 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from .models import UserProfile, FollowRelation
 from .services import generate_email_verification_token
+from .poi_categorization import categorize_google_place
 from community.models import SocialPost
 
 User = get_user_model()
+
+
+class POICategorizationTests(TestCase):
+    def test_school_type_is_not_meaningful(self):
+        result = categorize_google_place(
+            ["school", "point_of_interest", "establishment"],
+            "Springfield High School",
+        )
+
+        self.assertFalse(result["is_meaningful_poi"])
+        self.assertEqual(result["derived_category"], "OTHER")
+        self.assertIn("school", result["blocked_types"])
+
+    def test_university_name_without_types_is_not_meaningful(self):
+        result = categorize_google_place([], "Bogazici University")
+
+        self.assertFalse(result["is_meaningful_poi"])
+        self.assertEqual(result["derived_category"], "OTHER")
+
+    def test_museum_is_meaningful_historical(self):
+        result = categorize_google_place(
+            ["museum", "tourist_attraction"],
+            "Istanbul Archaeology Museum",
+        )
+
+        self.assertTrue(result["is_meaningful_poi"])
+        self.assertEqual(result["derived_category"], "HISTORICAL")
 
 class UserProfileTests(TestCase):
     def setUp(self):

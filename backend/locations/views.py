@@ -492,6 +492,23 @@ class POIViewSet(viewsets.ModelViewSet):
         if filters.get('interests_only') and pois.count() == 0:
             fallback_filters = {k: v for k, v in filters.items() if k != 'interests_only'}
             pois = GeoService.find_nearby(center, radius, fallback_filters)
+
+        # If a cell is still empty, attempt a one-shot sync before returning.
+        if pois.count() == 0 and bool(getattr(request.user, 'is_authenticated', False)):
+            try:
+                sync_service = ExternalSyncService(
+                    google_api_key=getattr(settings, 'GOOGLE_PLACES_API_KEY', None),
+                    fsq_api_key=getattr(settings, 'FOURSQUARE_API_KEY', None),
+                )
+                created_now = sync_service.fetch_and_sync(lat, lon)
+                if created_now > 0:
+                    pois = GeoService.find_nearby(center, radius, filters)
+                    if filters.get('interests_only') and pois.count() == 0:
+                        fallback_filters = {k: v for k, v in filters.items() if k != 'interests_only'}
+                        pois = GeoService.find_nearby(center, radius, fallback_filters)
+            except Exception:
+                logger.exception("on-demand sync failed lat=%s lon=%s", lat, lon)
+
         _maybe_trigger_external_sync(lat, lon, pois.count())
         
         serializer = POIListSerializer(pois, many=True)

@@ -17,6 +17,7 @@ from django.conf import settings
 
 from locations.models import POI
 from locations.services import ExternalSyncService
+from user.poi_categorization import categorize_google_place, map_derived_category_to_poi_category
 from .models import Itinerary, ItineraryItem
 
 logger = logging.getLogger(__name__)
@@ -1116,19 +1117,12 @@ class TripGenerationService:
 
     @classmethod
     def _infer_category_for_suggestion(cls, text: str, interests: List[str]) -> str:
-        normalized_text = cls._normalize_text(text)
         normalized_interests = cls._normalize_interests(interests)
-        mapped = cls._map_interests_to_categories(normalized_interests)
+        classification = categorize_google_place(normalized_interests, str(text or ''))
+        if classification.get('derived_category') and classification.get('derived_category') != 'OTHER':
+            return map_derived_category_to_poi_category(classification.get('derived_category'))
 
-        keyword_map = [
-            (POI.Category.HISTORICAL, ('museum', 'cathedral', 'church', 'palace', 'monument', 'tower', 'historic', 'landmark', 'chapel')),
-            (POI.Category.NATURE, ('park', 'garden', 'forest', 'beach', 'lake', 'river', 'nature', 'hill')),
-            (POI.Category.FOOD, ('restaurant', 'cafe', 'bakery', 'bar', 'food', 'market', 'bistro', 'brasserie')),
-            (POI.Category.ENTERTAINMENT, ('club', 'theater', 'cinema', 'mall', 'shopping', 'nightlife', 'show')),
-        ]
-        for category, keywords in keyword_map:
-            if any(token in normalized_text for token in keywords):
-                return category
+        mapped = cls._map_interests_to_categories(normalized_interests)
 
         if mapped:
             return mapped[0]
@@ -1193,6 +1187,11 @@ class TripGenerationService:
         if not cls._sanitize_suggested_names([name], city):
             return None
         if cls._normalize_text(name) == cls._normalize_text(city):
+            return None
+
+        # Reject obvious non-tourism places even if the LLM suggests them.
+        name_classification = categorize_google_place([], name)
+        if name_classification.get('blocked_types'):
             return None
 
         existing = cls._find_existing_city_poi_by_name(city, name)
@@ -1525,27 +1524,15 @@ Rules:
 
     @staticmethod
     def _map_external_to_category(place_class: str, place_type: str) -> str:
-        mapped_type = str(place_type or '').lower()
-        mapped_class = str(place_class or '').lower()
-
-        if mapped_class == 'tourism' or mapped_type in {'museum', 'monument', 'memorial', 'castle', 'ruins'}:
-            return POI.Category.HISTORICAL
-        if mapped_class in {'natural', 'leisure'} or mapped_type in {'park', 'garden', 'nature_reserve', 'zoo'}:
-            return POI.Category.NATURE
-        if mapped_class in {'amenity', 'shop'} and mapped_type in {'restaurant', 'cafe', 'bar', 'bakery'}:
-            return POI.Category.FOOD
-        return POI.Category.ENTERTAINMENT
+        mapped_type = str(place_type or '').strip().lower().replace('-', '_').replace(' ', '_')
+        mapped_class = str(place_class or '').strip().lower().replace('-', '_').replace(' ', '_')
+        classification = categorize_google_place([mapped_class, mapped_type], "")
+        return map_derived_category_to_poi_category(classification.get('derived_category'))
 
     @staticmethod
     def _keyword_category(name: str) -> str:
-        text = str(name or '').lower()
-        if any(token in text for token in ('museum', 'cathedral', 'church', 'palace', 'monument', 'tower', 'historic')):
-            return POI.Category.HISTORICAL
-        if any(token in text for token in ('park', 'garden', 'forest', 'beach', 'lake', 'river')):
-            return POI.Category.NATURE
-        if any(token in text for token in ('restaurant', 'cafe', 'bakery', 'bar', 'food', 'market')):
-            return POI.Category.FOOD
-        return POI.Category.ENTERTAINMENT
+        classification = categorize_google_place([], str(name or ''))
+        return map_derived_category_to_poi_category(classification.get('derived_category'))
 
     @staticmethod
     def _geocode_city_center(city: str):
@@ -1609,6 +1596,10 @@ Rules:
                 if not pageid or not name:
                     continue
             except (TypeError, ValueError):
+                continue
+
+            keyword_classification = categorize_google_place([], name)
+            if not keyword_classification.get('is_meaningful_poi'):
                 continue
 
             external_id = f"wiki-{pageid}"
@@ -1686,18 +1677,23 @@ Rules:
             place_type = str(item.get('type') or '').lower()
             place_class = str(item.get('class') or '').lower()
             external_id = f"osm-{item.get('place_id')}"
+            classification = categorize_google_place([place_class, place_type], name)
+            if not classification.get('is_meaningful_poi'):
+                continue
 
             tags = [place_type, place_class, str(locality).lower().replace(' ', '_'), city_text.lower().replace(' ', '_')]
+            tags.extend(classification.get('effective_types') or [])
             tags = [tag for tag in dict.fromkeys(tags) if tag]
 
             defaults = {
                 'name': name,
                 'address': address,
                 'location': Point(lon, lat),
-                'category': self._map_external_to_category(place_class, place_type),
+                'category': map_derived_category_to_poi_category(classification.get('derived_category')),
                 'metadata': {
                     'source': 'nominatim',
                     'city': str(locality),
+                    'categorization': classification,
                 },
                 'tags': tags,
             }
