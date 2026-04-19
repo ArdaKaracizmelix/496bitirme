@@ -521,11 +521,32 @@ export default function CommunityFeedScreen() {
                 style={styles.stateButton}
                 onPress={() => setShowCreateOptions(true)}
               >
-                <Text style={styles.stateButtonText}>Ilk gonderini olustur</Text>
+                <Text style={styles.stateButtonText}>Ilk gonderini gezginlerle paylas</Text>
               </TouchableOpacity>
             )}
           </View>
         </View>
+        {activeList === 'saved' ? null : (
+          <TouchableOpacity
+            style={[styles.fab, { bottom: fabBottom }]}
+            onPress={() => setShowCreateOptions(true)}
+            activeOpacity={0.9}
+          >
+            <Text style={styles.fabText}>+</Text>
+          </TouchableOpacity>
+        )}
+        <CreateOptionsModal
+          visible={showCreateOptions}
+          onClose={() => setShowCreateOptions(false)}
+          onCreatePost={() => {
+            setShowCreateOptions(false);
+            navigation.navigate('CreatePost');
+          }}
+          onShareRoute={() => {
+            setShowCreateOptions(false);
+            navigation.navigate('CreatePost', { openTripPicker: true });
+          }}
+        />
       </SafeAreaView>
     );
   }

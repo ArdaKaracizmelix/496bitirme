@@ -8,7 +8,9 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
+  Pressable,
   useWindowDimensions,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -113,6 +115,7 @@ export default function ProfileScreen({ route }) {
   const unfollowMutation = useUnfollowUser();
   const [activeTab, setActiveTab] = useState('journey');
   const [isActionsOpen, setIsActionsOpen] = useState(false);
+  const [showCreateOptions, setShowCreateOptions] = useState(false);
   const isCompact = width < 390;
   const contentMaxWidth = width >= 900 ? 720 : 640;
 
@@ -247,6 +250,22 @@ export default function ProfileScreen({ route }) {
     navigation.navigate('Social', {
       screen: 'PostDetail',
       params: { postId },
+    });
+  };
+
+  const navigateToCreatePost = (params = {}) => {
+    setShowCreateOptions(false);
+    const parentNavigation = navigation.getParent?.();
+    if (parentNavigation) {
+      parentNavigation.navigate('Social', {
+        screen: 'CreatePost',
+        params,
+      });
+      return;
+    }
+    navigation.navigate('Social', {
+      screen: 'CreatePost',
+      params,
     });
   };
 
@@ -445,9 +464,9 @@ export default function ProfileScreen({ route }) {
             {isOwnProfile ? (
               <TouchableOpacity
                 style={styles.createButton}
-                onPress={() => navigation.navigate('CreatePost')}
+                onPress={() => setShowCreateOptions(true)}
               >
-                <Text style={styles.createButtonText}>Ilk izini paylas</Text>
+                <Text style={styles.createButtonText}>Ilk gonderini gezginlerle paylas</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -459,7 +478,36 @@ export default function ProfileScreen({ route }) {
         showsVerticalScrollIndicator={false}
         scrollIndicatorInsets={{ right: 1 }}
       />
+      <CreateOptionsModal
+        visible={showCreateOptions}
+        onClose={() => setShowCreateOptions(false)}
+        onCreatePost={() => navigateToCreatePost()}
+        onShareRoute={() => navigateToCreatePost({ openTripPicker: true })}
+      />
     </SafeAreaView>
+  );
+}
+
+function CreateOptionsModal({ visible, onClose, onCreatePost, onShareRoute }) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalOverlay} onPress={onClose}>
+        <Pressable style={styles.sheet}>
+          <Text style={styles.sheetTitle}>Yeni paylasim</Text>
+          <TouchableOpacity style={styles.sheetAction} onPress={onCreatePost}>
+            <Text style={styles.sheetActionTitle}>Gonderi olustur</Text>
+            <Text style={styles.sheetActionSubtitle}>Foto, not veya gezi ani paylas</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.sheetAction} onPress={onShareRoute}>
+            <Text style={styles.sheetActionTitle}>Rota paylas</Text>
+            <Text style={styles.sheetActionSubtitle}>Hazir gezi planini akisa ekle</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.sheetCancel} onPress={onClose}>
+            <Text style={styles.sheetCancelText}>Iptal</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -1294,5 +1342,50 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '900',
     fontSize: 14,
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(14,14,26,0.46)',
+  },
+  sheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    backgroundColor: '#fffdf8',
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 18,
+  },
+  sheetTitle: {
+    color: '#1a1a2e',
+    fontSize: 18,
+    fontWeight: '900',
+    marginBottom: 12,
+  },
+  sheetAction: {
+    borderRadius: 18,
+    backgroundColor: '#f4eddf',
+    padding: 16,
+    marginBottom: 10,
+  },
+  sheetActionTitle: {
+    color: '#1a1a2e',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  sheetActionSubtitle: {
+    color: '#746b5e',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  sheetCancel: {
+    alignItems: 'center',
+    paddingVertical: 13,
+  },
+  sheetCancelText: {
+    color: '#746b5e',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });
