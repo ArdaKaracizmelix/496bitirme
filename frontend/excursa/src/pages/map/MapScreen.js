@@ -44,7 +44,7 @@ const escapeHtml = (value = '') =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const buildWebMapHtml = (markers, region) => {
+const buildWebMapHtml = (markers, region, routeStops) => {
   const safeMarkers = (markers || []).map((item) => ({
     id: item.id || `${item.latitude}-${item.longitude}`,
     type: item.type || 'marker',
@@ -59,13 +59,36 @@ const buildWebMapHtml = (markers, region) => {
     average_rating: item.average_rating || 0,
   }));
 
-  const centerLat = region?.latitude || 41.0082;
-  const centerLng = region?.longitude || 28.9784;
-  const explicitZoom = Number(region?.zoomLevel);
-  const latDelta = Number(region?.latitudeDelta) || 0.1;
-  const estimatedZoom = Number.isFinite(explicitZoom)
-    ? Math.max(2, Math.min(18, Math.round(explicitZoom)))
-    : Math.max(2, Math.min(18, Math.round(Math.log2(360 / Math.max(latDelta, 0.0001)))));
+  const safeRouteStops = Array.isArray(routeStops)
+    ? routeStops
+        .filter((s) => Number.isFinite(Number(s?.poi?.latitude ?? s?.latitude)) && Number.isFinite(Number(s?.poi?.longitude ?? s?.longitude)))
+        .map((s, idx) => ({
+          order: idx + 1,
+          name: escapeHtml(s?.poi?.name ?? s?.name ?? `Durak ${idx + 1}`),
+          latitude: Number(s?.poi?.latitude ?? s?.latitude),
+          longitude: Number(s?.poi?.longitude ?? s?.longitude),
+          category: s?.poi?.display_category ?? s?.poi?.category ?? s?.category ?? '',
+        }))
+    : [];
+
+  const isRouteMode = safeRouteStops.length > 0;
+
+  let centerLat, centerLng, estimatedZoom;
+  if (isRouteMode) {
+    const lats = safeRouteStops.map((s) => s.latitude);
+    const lngs = safeRouteStops.map((s) => s.longitude);
+    centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+    centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+    estimatedZoom = 12;
+  } else {
+    centerLat = region?.latitude || 41.0082;
+    centerLng = region?.longitude || 28.9784;
+    const explicitZoom = Number(region?.zoomLevel);
+    const latDelta = Number(region?.latitudeDelta) || 0.1;
+    estimatedZoom = Number.isFinite(explicitZoom)
+      ? Math.max(2, Math.min(18, Math.round(explicitZoom)))
+      : Math.max(2, Math.min(18, Math.round(Math.log2(360 / Math.max(latDelta, 0.0001)))));
+  }
 
   return `
 <!DOCTYPE html>
@@ -100,47 +123,89 @@ const buildWebMapHtml = (markers, region) => {
       border: 3px solid white;
       box-shadow: 0 8px 20px rgba(17, 24, 39, .22);
     }
+    .route-marker {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #e74c3c;
+      color: white;
+      font: 800 14px/36px system-ui, sans-serif;
+      text-align: center;
+      border: 3px solid white;
+      box-shadow: 0 4px 14px rgba(0,0,0,.35);
+    }
+    .route-marker.first { background: #27ae60; }
+    .route-marker.last  { background: #e74c3c; }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <script>
     var markers = ${JSON.stringify(safeMarkers)};
+    var routeStops = ${JSON.stringify(safeRouteStops)};
+    var isRouteMode = ${isRouteMode};
     var map = L.map('map', { zoomControl: true }).setView([${centerLat}, ${centerLng}], ${estimatedZoom});
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19
     }).addTo(map);
 
-    markers.forEach(function(item) {
-      if (!Number.isFinite(item.latitude) || !Number.isFinite(item.longitude)) return;
+    if (isRouteMode && routeStops.length > 0) {
+      var latlngs = routeStops.map(function(s) { return [s.latitude, s.longitude]; });
 
-      if (item.type === 'cluster') {
+      L.polyline(latlngs, {
+        color: '#3498db',
+        weight: 4,
+        opacity: 0.85,
+        dashArray: '8, 6',
+      }).addTo(map);
+
+      routeStops.forEach(function(stop, idx) {
+        var isFirst = idx === 0;
+        var isLast = idx === routeStops.length - 1;
+        var cls = 'route-marker' + (isFirst ? ' first' : isLast ? ' last' : '');
         var icon = L.divIcon({
-          html: '<div class="cluster">' + item.count + '</div>',
+          html: '<div class="' + cls + '">' + stop.order + '</div>',
           className: '',
-          iconSize: [42, 42],
+          iconSize: [36, 36],
+          iconAnchor: [18, 18],
         });
-        L.marker([item.latitude, item.longitude], { icon: icon }).addTo(map);
-        return;
-      }
+        var m = L.marker([stop.latitude, stop.longitude], { icon: icon }).addTo(map);
+        m.bindPopup('<b>' + stop.order + '. ' + stop.name + '</b>' + (stop.category ? '<br/>' + stop.category : ''));
+      });
 
-      var markerIcon = L.divIcon({
-        html: '<div class="poi-marker" style="background:' + item.color + '">' + item.icon + '</div>',
-        className: '',
-        iconSize: [34, 34],
-        iconAnchor: [17, 17],
+      map.fitBounds(latlngs, { padding: [40, 40] });
+    } else {
+      markers.forEach(function(item) {
+        if (!Number.isFinite(item.latitude) || !Number.isFinite(item.longitude)) return;
+
+        if (item.type === 'cluster') {
+          var icon = L.divIcon({
+            html: '<div class="cluster">' + item.count + '</div>',
+            className: '',
+            iconSize: [42, 42],
+          });
+          L.marker([item.latitude, item.longitude], { icon: icon }).addTo(map);
+          return;
+        }
+
+        var markerIcon = L.divIcon({
+          html: '<div class="poi-marker" style="background:' + item.color + '">' + item.icon + '</div>',
+          className: '',
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+        });
+        var marker = L.marker([item.latitude, item.longitude], { icon: markerIcon }).addTo(map);
+        var popupTitle = item.nameEscaped || 'POI';
+        var popupCategory = item.category ? '<br/>' + item.category : '';
+        marker.bindPopup('<b>' + popupTitle + '</b>' + popupCategory);
+        marker.on('click', function() {
+          window.parent.postMessage(JSON.stringify({
+            type: 'poi-click',
+            poiId: item.id
+          }), '*');
+        });
       });
-      var marker = L.marker([item.latitude, item.longitude], { icon: markerIcon }).addTo(map);
-      var popupTitle = item.nameEscaped || 'POI';
-      var popupCategory = item.category ? '<br/>' + item.category : '';
-      marker.bindPopup('<b>' + popupTitle + '</b>' + popupCategory);
-      marker.on('click', function() {
-        window.parent.postMessage(JSON.stringify({
-          type: 'poi-click',
-          poiId: item.id
-        }), '*');
-      });
-    });
+    }
 
     function publishRegionChange() {
       var c = map.getCenter();
@@ -170,11 +235,15 @@ const buildWebMapHtml = (markers, region) => {
 </html>`;
 };
 
-export default function MapScreen({ navigation }) {
+export default function MapScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
   const locationInitializedRef = useRef(false);
   const markersRef = useRef([]);
+
+  const routeStops = route?.params?.routeStops ?? null;
+  const routeTitle = route?.params?.routeTitle ?? null;
+  const isRouteMode = Array.isArray(routeStops) && routeStops.length > 0;
 
   const {
     displayedMarkers,
@@ -198,8 +267,8 @@ export default function MapScreen({ navigation }) {
   const [searchText, setSearchText] = useState('');
   const [searchDebouncedText, setSearchDebouncedText] = useState('');
   const webMapHtml = useMemo(
-    () => buildWebMapHtml(displayedMarkers, currentRegion),
-    [displayedMarkers, currentRegion]
+    () => buildWebMapHtml(displayedMarkers, currentRegion, isRouteMode ? routeStops : null),
+    [displayedMarkers, currentRegion, isRouteMode, routeStops]
   );
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -371,21 +440,43 @@ export default function MapScreen({ navigation }) {
         </View>
       )}
 
-      <View style={[styles.searchContainer, { top: insets.top + 12 }]}>
-        <View style={styles.searchBar}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Yer ara..."
-            placeholderTextColor="#95a5a6"
-            value={searchText}
-            onChangeText={setSearchText}
-          />
-          {searchText.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchText('')}>
-              <Text style={styles.clearButton}>X</Text>
-            </TouchableOpacity>
-          )}
+      {isRouteMode ? (
+        <View style={[styles.routeBanner, { top: insets.top + 12 }]}>
+          <TouchableOpacity style={styles.routeBannerBack} onPress={() => navigation.setParams({ routeStops: null, routeTitle: null })}>
+            <Text style={styles.routeBannerBackText}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.routeBannerTitle} numberOfLines={1}>
+            {routeTitle || 'Rota'}
+          </Text>
+          <Text style={styles.routeBannerCount}>{routeStops.length} durak</Text>
         </View>
+      ) : (
+        <View style={[styles.searchContainer, { top: insets.top + 12 }]}>
+          <View style={styles.searchBar}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Yer ara..."
+              placeholderTextColor="#95a5a6"
+              value={searchText}
+              onChangeText={setSearchText}
+            />
+            {searchText.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchText('')}>
+                <Text style={styles.clearButton}>X</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => setFilterModalVisible(true)}
+          >
+            <Text style={styles.filterButtonText}>Filtre</Text>
+            {Object.values(activeFilters).some((value) => value) && (
+              <View style={styles.filterBadge} />
+            )}
+          </TouchableOpacity>
+        
 
         <TouchableOpacity
           style={[styles.filterButton, activeFilterCount > 0 && styles.filterButtonActive]}
@@ -399,8 +490,10 @@ export default function MapScreen({ navigation }) {
               <Text style={styles.filterCountText}>{activeFilterCount}</Text>
             </View>
           )}
-        </TouchableOpacity>
-      </View>
+          </TouchableOpacity>
+        </View>
+      )}
+        
 
       {activeFilterCount > 0 && (
         <View style={[styles.activeFilterRail, { top: insets.top + 66 }]}>
@@ -604,6 +697,43 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '500',
+  },
+  routeBanner: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    zIndex: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 5,
+    gap: 8,
+  },
+  routeBannerBack: {
+    paddingRight: 4,
+  },
+  routeBannerBackText: {
+    fontSize: 20,
+    color: '#2c3e50',
+    fontWeight: '700',
+  },
+  routeBannerTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#2c3e50',
+  },
+  routeBannerCount: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontWeight: '600',
   },
   searchContainer: {
     position: 'absolute',

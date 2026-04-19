@@ -17,11 +17,13 @@ import {
   FlatList,
   Dimensions,
   SectionList,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import useTripStore from '../store/tripStore';
 import locationService from '../services/locationService';
 import useAuthStore from '../store/authStore';
+import TripService from '../services/TripService';
 
 const CATEGORY_COLORS = {
   HISTORICAL: '#e74c3c',
@@ -431,6 +433,38 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
     }
   }, [tripTitle, tripDate, currentTripStops, navigation, store]);
 
+  const handleShowOnMap = useCallback(() => {
+    if (currentTripStops.length === 0) {
+      Alert.alert('Bilgi', 'Haritada göstermek için en az bir durak ekleyin');
+      return;
+    }
+    navigation.navigate('Home', {
+      screen: 'MapExplore',
+      params: {
+        routeStops: currentTripStops,
+        routeTitle: tripTitle || currentTrip?.title || 'Rota',
+      },
+    });
+  }, [currentTripStops, navigation, tripTitle, currentTrip]);
+
+  const handleShareRoute = useCallback(async () => {
+    if (!currentTrip?.id) {
+      Alert.alert('Bilgi', 'Rotayı paylaşmak için önce kaydedin');
+      return;
+    }
+    try {
+      const data = await TripService.shareTrip(currentTrip.id);
+      const shareLink = data?.share_link ?? data?.url ?? data?.link ?? '';
+      const message = shareLink
+        ? `${currentTrip?.title || 'Rotam'} rotasına göz at: ${shareLink}`
+        : currentTrip?.title || 'Rotamı paylaşıyorum';
+      await Share.share({ message });
+    } catch {
+      Alert.alert('Hata', 'Rota paylaşılamadı');
+    }
+  }, [currentTrip]);
+
+
   /**
    * Render stop item
    */
@@ -684,29 +718,8 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
           )}
         </View>
 
-        {false && (
-        <>
-        {/* Additional Actions */}
         <View style={styles.section}>
-          <TouchableOpacity style={styles.actionButton}>
-            <Text style={styles.actionButtonIcon}>🗺️</Text>
-            <Text style={styles.actionButtonText}>Harita Üzerinde Göster</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
-            <Text style={styles.actionButtonIcon}>📸</Text>
-            <Text style={styles.actionButtonText}>Rota Paylaş</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
-            <Text style={styles.actionButtonIcon}>📅</Text>
-            <Text style={styles.actionButtonText}>Takvime Ekle</Text>
-          </TouchableOpacity>
-        </View>
-
-        </>
-        )}
-
-        <View style={styles.section}>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleShowOnMap}>
             <Text style={styles.actionButtonIcon}>Map</Text>
             <Text style={styles.actionButtonText}>Harita Uzerinde Goster</Text>
           </TouchableOpacity>
