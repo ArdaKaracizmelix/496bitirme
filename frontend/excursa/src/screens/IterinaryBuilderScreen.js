@@ -773,29 +773,8 @@ export default function IterinaryBuilderScreen({ route, navigation }) {
           )}
         </View>
 
-        {false && (
-        <>
-        {/* Additional Actions */}
         <View style={styles.section}>
           <TouchableOpacity style={styles.actionButton} onPress={handleShowOnMap}>
-            <Text style={styles.actionButtonIcon}>🗺️</Text>
-            <Text style={styles.actionButtonText}>Harita Üzerinde Göster</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={handleShareRoute}>
-            <Text style={styles.actionButtonIcon}>📸</Text>
-            <Text style={styles.actionButtonText}>Rota Paylaş</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
-            <Text style={styles.actionButtonIcon}>📅</Text>
-            <Text style={styles.actionButtonText}>Takvime Ekle</Text>
-          </TouchableOpacity>
-        </View>
-
-        </>
-        )}
-
-        <View style={styles.section}>
-          <TouchableOpacity style={styles.actionButton}>
             <Text style={styles.actionButtonIcon}>Map</Text>
             <Text style={styles.actionButtonText}>Harita Uzerinde Goster</Text>
           </TouchableOpacity>
