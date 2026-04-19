@@ -424,7 +424,7 @@ export default function MapScreen({ navigation, route }) {
 
       {isRouteMode ? (
         <View style={[styles.routeBanner, { top: insets.top + 12 }]}>
-          <TouchableOpacity style={styles.routeBannerBack} onPress={() => navigation.goBack()}>
+          <TouchableOpacity style={styles.routeBannerBack} onPress={() => navigation.setParams({ routeStops: null, routeTitle: null })}>
             <Text style={styles.routeBannerBackText}>←</Text>
           </TouchableOpacity>
           <Text style={styles.routeBannerTitle} numberOfLines={1}>
