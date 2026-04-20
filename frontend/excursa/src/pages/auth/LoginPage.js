@@ -25,13 +25,13 @@ const translateLoginError = (error) => {
 
   const detail = error.response?.data?.detail || error.response?.data?.message;
   if (error.response?.status === 403 || /verify/i.test(String(detail))) {
-    return 'Giris yapmadan once e-posta adresini dogrulaman gerekiyor. Gelen kutunu kontrol et.';
+    return 'Giriş yapmadan önce e-posta adresini dogrulaman gerekiyor. Gelen kutunu kontrol et.';
   }
   if (error.response?.status === 401) {
-    return 'Email veya sifre hatali. Bilgilerini kontrol edip tekrar dene.';
+    return 'Email veya şifre hatali. Bilgilerini kontrol edip tekrar dene.';
   }
 
-  return detail || 'Giris basarisiz. Bilgilerini kontrol et.';
+  return detail || 'Giriş başarısız. Bilgilerini kontrol et.';
 };
 
 export default function LoginPage({ navigation, route }) {
@@ -67,7 +67,7 @@ export default function LoginPage({ navigation, route }) {
       return;
     }
     if (!password) {
-      setErrorMessage('Sifre gerekli.');
+      setErrorMessage('Şifre gerekli.');
       return;
     }
 
@@ -102,7 +102,7 @@ export default function LoginPage({ navigation, route }) {
             <Text style={[styles.brand, isCompact && styles.brandCompact]}>EXCURSA</Text>
             <Text style={[styles.title, isCompact && styles.titleCompact]}>Tekrar hos geldin</Text>
             <Text style={[styles.subtitle, isCompact && styles.subtitleCompact]}>
-              Rotalarina, kayitli gezilerine ve seyahat akisina kaldigin yerden devam et.
+              Rotalarina, kayitli gezilerine ve seyahat akışina kaldigin yerden devam et.
             </Text>
 
             {infoMessage ? (
@@ -136,7 +136,7 @@ export default function LoginPage({ navigation, route }) {
             </View>
 
             <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Sifre</Text>
+              <Text style={styles.label}>Şifre</Text>
               <View style={[styles.passwordShell, isNarrow && styles.passwordShellNarrow]}>
                 <TextInput
                   style={[styles.passwordInput, isNarrow && styles.passwordInputNarrow]}
@@ -170,14 +170,14 @@ export default function LoginPage({ navigation, route }) {
               {isLoading ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text style={styles.primaryButtonText}>Giris Yap</Text>
+                <Text style={styles.primaryButtonText}>Giriş Yap</Text>
               )}
             </TouchableOpacity>
 
             <View style={[styles.footer, isNarrow && styles.footerCompact]}>
-              <Text style={[styles.footerText, isNarrow && styles.footerTextCompact]}>Hesabin yok mu?</Text>
+              <Text style={[styles.footerText, isNarrow && styles.footerTextCompact]}>Hesabın yok mu?</Text>
               <TouchableOpacity onPress={() => navigation.navigate('Register')} disabled={isLoading}>
-                <Text style={styles.footerLink}>Kayit ol</Text>
+                <Text style={styles.footerLink}>Kayıt ol</Text>
               </TouchableOpacity>
             </View>
           </View>

@@ -28,7 +28,7 @@ import {
 } from '../hooks/useSocial';
 import useAuthStore from '../store/authStore';
 const TAB_ITEMS = [
-  { id: 'journey', label: 'Gunluk', hint: 'Tum izler' },
+  { id: 'journey', label: 'Günlük', hint: 'Tüm izler' },
   { id: 'routes', label: 'Rotalar', hint: 'Planlar' },
   { id: 'notes', label: 'Notlar', hint: 'Anlar' },
 ];
@@ -65,13 +65,13 @@ const formatCompactNumber = (value) => {
 
 const getPostPreviewTitle = (post) => {
   if (post.type === 'route') return post.routeData?.title || 'Paylasilan rota';
-  if (post.type === 'media') return post.content || post?.location || 'Gorsel ani';
+  if (post.type === 'media') return post.content || post?.location || 'Görsel ani';
   return post.content || 'Seyahat notu';
 };
 
 const getPostTypeLabel = (post) => {
   if (post.type === 'route') return 'Rota';
-  if (post.type === 'media') return 'Gorsel';
+  if (post.type === 'media') return 'Görsel';
   return 'Not';
 };
 
@@ -80,7 +80,7 @@ const getRouteMeta = (routeData) => {
   const duration = formatRouteDuration(routeData?.total_duration);
   if (stops && duration) return `${stops} durak - ${duration}`;
   if (stops) return `${stops} durak`;
-  return duration || 'Rota detayi';
+  return duration || 'Rota detayı';
 };
 
 export default function ProfileScreen({ route }) {
@@ -136,37 +136,35 @@ export default function ProfileScreen({ route }) {
   const isError = isProfileError || isPostsError;
   const isFollowing = !isOwnProfile && !!profileData?.is_following;
   const isFollowUpdating = followMutation.isPending || unfollowMutation.isPending;
+  const profileRouteFallback = isOwnProfile ? {} : routeParams;
 
   const userProfile = useMemo(
     () => ({
       id: userId,
       full_name:
-        routeParams.full_name ||
-        routeParams.user_name ||
+        (isOwnProfile ? null : profileRouteFallback.full_name) ||
+        (isOwnProfile ? null : profileRouteFallback.user_name) ||
         profileData?.full_name ||
-        currentUser?.full_name ||
         profileData?.username ||
         profileData?.email ||
-        'Kullanici',
+        currentUser?.full_name ||
+        'Kullanıcı',
       avatar_url:
         profileData?.avatar_url ||
-        routeParams.avatar_url ||
-        currentUser?.avatar_url ||
+        (isOwnProfile ? currentUser?.avatar_url : profileRouteFallback.avatar_url) ||
         null,
-      bio: profileData?.bio ?? routeParams.bio ?? currentUser?.bio ?? '',
+      bio: profileData?.bio ?? (isOwnProfile ? currentUser?.bio : profileRouteFallback.bio) ?? '',
       followers_count:
         profileData?.followers_count ??
-        routeParams.followers_count ??
-        currentUser?.followers_count ??
+        (isOwnProfile ? currentUser?.followers_count : profileRouteFallback.followers_count) ??
         0,
       following_count:
         profileData?.following_count ??
-        routeParams.following_count ??
-        currentUser?.following_count ??
+        (isOwnProfile ? currentUser?.following_count : profileRouteFallback.following_count) ??
         0,
       interests: Array.isArray(profileData?.interests) ? profileData.interests : [],
     }),
-    [currentUser, profileData, routeParams, userId]
+    [currentUser, isOwnProfile, profileData, profileRouteFallback, userId]
   );
 
   const profileSummary = useMemo(
@@ -189,22 +187,22 @@ export default function ProfileScreen({ route }) {
       try {
         await logout();
       } catch {
-        Alert.alert('Hata', 'Cikis yapilirken bir hata olustu.');
+        Alert.alert('Hata', 'Çıkış yapılırken bir hata oluştu.');
       }
     };
 
     if (Platform.OS === 'web') {
       const confirmed =
         typeof window !== 'undefined'
-          ? window.confirm('Hesabinizdan cikis yapmak istiyor musunuz?')
+          ? window.confirm('Hesabinizdan çıkış yapmak istiyor musunuz?')
           : true;
       if (confirmed) runLogout();
       return;
     }
 
-    Alert.alert('Cikis Yap', 'Hesabinizdan cikis yapmak istiyor musunuz?', [
-      { text: 'Iptal', style: 'cancel' },
-      { text: 'Cikis Yap', style: 'destructive', onPress: runLogout },
+    Alert.alert('Çıkış Yap', 'Hesabinizdan çıkış yapmak istiyor musunuz?', [
+      { text: 'İptal', style: 'cancel' },
+      { text: 'Çıkış Yap', style: 'destructive', onPress: runLogout },
     ]);
   };
 
@@ -221,7 +219,7 @@ export default function ProfileScreen({ route }) {
       const message =
         error?.response?.data?.message ||
         error?.response?.data?.detail ||
-        'Takip islemi basarisiz oldu.';
+        'Takip islemi başarısız oldu.';
       Alert.alert('Hata', message);
     }
   };
@@ -283,7 +281,7 @@ export default function ProfileScreen({ route }) {
                 {userProfile.full_name}
               </Text>
               <Text style={styles.profileSubtitle} numberOfLines={1}>
-                {routePosts.length ? 'Rota anlatilari ve kesif notlari' : 'Kesif notlari ve sosyal izler'}
+                {routePosts.length ? 'Rota anlatilari ve keşif notlari' : 'Keşif notlari ve sosyal izler'}
               </Text>
             </View>
           </View>
@@ -305,19 +303,19 @@ export default function ProfileScreen({ route }) {
         </View>
 
         <Text style={styles.profileBio}>
-          {userProfile.bio || 'Bu profil henuz bio eklemedi; paylastigi rotalar ve notlar burada karakterini gosterecek.'}
+          {userProfile.bio || 'Bu profil henüz bio eklemedi; paylastigi rotalar ve notlar burada karakterini gosterecek.'}
         </Text>
 
         {isOwnProfile && isActionsOpen ? (
           <View style={styles.actionsPanel}>
             <ProfileActionRow
-              label="Profili Duzenle"
-              description="Foto, bio ve gorunen profil bilgileri"
+              label="Profili Düzenle"
+              description="Foto, bio ve görünen profil bilgileri"
               icon="P"
               onPress={handleEditProfilePress}
             />
             <ProfileActionRow
-              label="Cikis Yap"
+              label="Çıkış Yap"
               description="Bu cihazdaki oturumu kapat"
               icon="!"
               destructive
@@ -380,7 +378,7 @@ export default function ProfileScreen({ route }) {
 
       <View style={styles.sectionIntro}>
         <View>
-          <Text style={styles.sectionTitle}>Paylasimlar</Text>
+          <Text style={styles.sectionTitle}>Paylaşımlar</Text>
         </View>
         <Text style={styles.sectionMeta}>{visiblePosts.length} icerik</Text>
       </View>
@@ -417,7 +415,7 @@ export default function ProfileScreen({ route }) {
         {renderHeader()}
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1a1a2e" />
-          <Text style={styles.loadingText}>Profil akisi hazirlaniyor</Text>
+          <Text style={styles.loadingText}>Profil akışı hazirlaniyor</Text>
         </View>
       </SafeAreaView>
     );
@@ -428,7 +426,7 @@ export default function ProfileScreen({ route }) {
       <SafeAreaView style={styles.container} edges={['top']}>
         {renderHeader()}
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Profil verileri yuklenemedi</Text>
+          <Text style={styles.errorText}>Profil verileri yüklenemedi</Text>
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => {
@@ -453,7 +451,7 @@ export default function ProfileScreen({ route }) {
         ListEmptyComponent={
           <View style={[styles.emptyContainer, { maxWidth: contentMaxWidth }]}>
             <Text style={styles.emptyTitle}>
-              {activeTab === 'routes' ? 'Henuz rota izi yok' : 'Henuz profil izi yok'}
+              {activeTab === 'routes' ? 'Henüz rota izi yok' : 'Henüz profil izi yok'}
             </Text>
             <Text style={styles.emptySubtitle}>
               {activeTab === 'routes'
@@ -465,7 +463,7 @@ export default function ProfileScreen({ route }) {
                 style={styles.createButton}
                 onPress={() => setShowCreateOptions(true)}
               >
-                <Text style={styles.createButtonText}>Ilk gonderini gezginlerle paylas</Text>
+                <Text style={styles.createButtonText}>Ilk gonderini gezginlerle paylaş</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -494,15 +492,15 @@ function CreateOptionsModal({ visible, onClose, onCreatePost, onShareRoute }) {
         <Pressable style={styles.sheet}>
           <Text style={styles.sheetTitle}>Yeni paylasim</Text>
           <TouchableOpacity style={styles.sheetAction} onPress={onCreatePost}>
-            <Text style={styles.sheetActionTitle}>Gonderi olustur</Text>
-            <Text style={styles.sheetActionSubtitle}>Foto, not veya gezi ani paylas</Text>
+            <Text style={styles.sheetActionTitle}>Gönderi oluştur</Text>
+            <Text style={styles.sheetActionSubtitle}>Foto, not veya gezi ani paylaş</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sheetAction} onPress={onShareRoute}>
-            <Text style={styles.sheetActionTitle}>Rota paylas</Text>
-            <Text style={styles.sheetActionSubtitle}>Hazir gezi planini akisa ekle</Text>
+            <Text style={styles.sheetActionTitle}>Rota paylaş</Text>
+            <Text style={styles.sheetActionSubtitle}>Hazır gezi planini akışa ekle</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sheetCancel} onPress={onClose}>
-            <Text style={styles.sheetCancelText}>Iptal</Text>
+            <Text style={styles.sheetCancelText}>İptal</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>

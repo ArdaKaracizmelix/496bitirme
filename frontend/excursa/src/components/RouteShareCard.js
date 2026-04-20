@@ -92,7 +92,7 @@ export default function RouteShareCard({ routeData, compact = false }) {
     try {
       const clonedTrip = await cloneTripMutation.mutateAsync(routeData.id);
       const clonedTitle = String(clonedTrip?.title || '').trim();
-      showFeedback('Basarili', clonedTitle ? `"${clonedTitle}" kopyalandi.` : 'Rota kopyalandi.');
+      showFeedback('Başarılı', clonedTitle ? `"${clonedTitle}" kopyalandı.` : 'Rota kopyalandı.');
       setVisible(false);
     } catch (error) {
       const message =
@@ -153,7 +153,7 @@ export default function RouteShareCard({ routeData, compact = false }) {
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            {routeData.author_name ? `${routeData.author_name} tarafindan paylasildi` : 'Rota detaylarini gor'}
+            {routeData.author_name ? `${routeData.author_name} tarafindan paylaşıldı` : 'Rota detaylarini gör'}
           </Text>
           <View style={styles.cta}>
             <Text style={styles.ctaText}>Detayi ac</Text>
@@ -166,7 +166,7 @@ export default function RouteShareCard({ routeData, compact = false }) {
           <Pressable style={styles.sheet}>
             <View style={styles.sheetHandle} />
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetContent}>
-              <Text style={styles.sheetKicker}>Rota detayi</Text>
+              <Text style={styles.sheetKicker}>Rota detayı</Text>
               <Text style={styles.sheetTitle}>{routeData.title}</Text>
               {!!routeData.summary && <Text style={styles.sheetSummary}>{routeData.summary}</Text>}
 
@@ -199,7 +199,7 @@ export default function RouteShareCard({ routeData, compact = false }) {
                   ))
                 ) : (
                   <View style={styles.emptyStops}>
-                    <Text style={styles.emptyStopsTitle}>Durak detaylari bu paylasimda yok</Text>
+                    <Text style={styles.emptyStopsTitle}>Durak detayları bu paylasimda yok</Text>
                     <Text style={styles.emptyStopsText}>
                       Yeni rota paylasimlari durak listesi ve zengin ozet ile gorunecek.
                     </Text>

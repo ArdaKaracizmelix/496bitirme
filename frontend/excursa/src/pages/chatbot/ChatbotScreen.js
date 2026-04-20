@@ -33,7 +33,7 @@ const COLORS = {
 };
 
 const QUICK_REPLIES = [
-  "Istanbul'da 2 gunluk rota yap",
+  "İstanbul'da 2 günlük rota yap",
   'Sanliurfa tarihi gezi plani',
   'Ankara tarihi yerler oner',
   'Yemek odakli rota hazirla',
@@ -44,7 +44,7 @@ const createWelcomeMessage = () => ({
   type: 'bot',
   messageType: 'text',
   content:
-    'Merhaba, ben Excursa Asistan. Sehir, gun sayisi ve ilgi alanini yaz; sana gun gun, okunabilir bir gezi plani hazirlayayim.',
+    'Merhaba, ben Excursa Asistan. Şehir, gun sayisi ve ilgi alanini yaz; sana gun gun, okunabilir bir gezi plani hazirlayayim.',
   timestamp: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
   metadata: {},
 });
@@ -240,7 +240,7 @@ export default function ChatbotScreen({ sessionId, navigation }) {
       await persistHistory([welcome]);
     } catch (error) {
       console.error('Error clearing chat:', error);
-      Alert.alert('Temizlenemedi', 'Sohbet temizlenirken bir hata olustu. Lutfen tekrar deneyin.');
+      Alert.alert('Temizlenemedi', 'Sohbet temizlenirken bir hata oluştu. Lutfen tekrar deneyin.');
     } finally {
       setIsClearing(false);
     }
@@ -307,7 +307,7 @@ export default function ChatbotScreen({ sessionId, navigation }) {
               onPress={handleBackToFeed}
               activeOpacity={0.78}
               accessibilityRole="button"
-              accessibilityLabel="Akisa don"
+              accessibilityLabel="akışa don"
             >
               <Text style={styles.backButtonText}>‹</Text>
             </TouchableOpacity>
@@ -402,7 +402,7 @@ export default function ChatbotScreen({ sessionId, navigation }) {
           <Pressable style={styles.confirmCard}>
             <Text style={styles.confirmTitle}>Sohbeti temizle?</Text>
             <Text style={styles.confirmText}>
-              Bu ekrandaki mesajlar ve backend sohbet gecmisi temizlenecek. Bu islem geri alinamaz.
+              Bu ekrandaki mesajlar ve backend sohbet gecmisi temizlenecek. Bu işlem geri alınamaz.
             </Text>
             <View style={styles.confirmActions}>
               <TouchableOpacity

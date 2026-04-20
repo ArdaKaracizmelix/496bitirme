@@ -100,7 +100,7 @@ export default function EditProfileScreen() {
         error?.response?.data?.detail ||
         (Array.isArray(error?.response?.data?.file) ? error.response.data.file[0] : null) ||
         error?.message;
-      throw new Error(backendMessage || 'Avatar yuklenemedi.');
+      throw new Error(backendMessage || 'Avatar yüklenemedi.');
     }
   };
 
@@ -128,18 +128,18 @@ export default function EditProfileScreen() {
       setSelectedAvatarAsset(asset);
       setAvatarUrl(asset.uri || '');
     } catch (error) {
-      setErrorMessage('Fotograf secilirken bir hata olustu.');
+      setErrorMessage('Fotoğraf secilirken bir hata oluştu.');
     }
   };
 
   const handleSave = async () => {
     setErrorMessage('');
     if (!username.trim() || username.trim().length < 3) {
-      setErrorMessage('Kullanici adi en az 3 karakter olmali.');
+      setErrorMessage('Kullanıcı adi en az 3 karakter olmalı.');
       return;
     }
     if (!fullName.trim() || fullName.trim().length < 2) {
-      setErrorMessage('Ad soyad en az 2 karakter olmali.');
+      setErrorMessage('Ad soyad en az 2 karakter olmalı.');
       return;
     }
     if (newPassword && newPassword !== confirmPassword) {
@@ -147,7 +147,7 @@ export default function EditProfileScreen() {
       return;
     }
     if (newPassword && !currentPassword) {
-      setErrorMessage('Sifre degistirmek icin mevcut sifre gerekli.');
+      setErrorMessage('Şifre degistirmek icin mevcut şifre gerekli.');
       return;
     }
 
@@ -201,7 +201,7 @@ export default function EditProfileScreen() {
         const message =
           error?.response?.data?.detail ||
           error?.response?.data?.error ||
-          'Hesap silinirken bir hata olustu.';
+          'Hesap silinirken bir hata oluştu.';
         setErrorMessage(message);
         if (Platform.OS !== 'web') {
           Alert.alert('Hata', message);
@@ -215,7 +215,7 @@ export default function EditProfileScreen() {
       const confirmed =
         typeof window !== 'undefined'
           ? window.confirm(
-              'Hesabin kalici olarak silinecek. Bu islem geri alinamaz. Devam etmek istiyor musun?'
+              'Hesabın kalıcı olarak silinecek. Bu işlem geri alınamaz. Devam etmek istiyor musun?'
             )
           : false;
       if (confirmed) runDelete();
@@ -224,9 +224,9 @@ export default function EditProfileScreen() {
 
     Alert.alert(
       'Hesabi Sil',
-      'Hesabin kalici olarak silinecek. Bu islem geri alinamaz.',
+      'Hesabın kalıcı olarak silinecek. Bu işlem geri alınamaz.',
       [
-        { text: 'Iptal', style: 'cancel' },
+        { text: 'İptal', style: 'cancel' },
         { text: 'Sil', style: 'destructive', onPress: runDelete },
       ]
     );
@@ -260,7 +260,7 @@ export default function EditProfileScreen() {
             </TouchableOpacity>
             <View style={styles.topTitleWrap}>
               <Text style={styles.kicker}>PROFIL AYARLARI</Text>
-              <Text style={styles.title}>Profili Duzenle</Text>
+              <Text style={styles.title}>Profili Düzenle</Text>
             </View>
             <View style={styles.iconButtonGhost} />
           </View>
@@ -273,14 +273,14 @@ export default function EditProfileScreen() {
                 onPress={handlePickAvatar}
                 disabled={isSaving}
               >
-                <Text style={styles.avatarActionText}>Degistir</Text>
+                <Text style={styles.avatarActionText}>Değiştir</Text>
               </TouchableOpacity>
             </View>
             <View style={styles.previewTextWrap}>
               <Text style={styles.previewName} numberOfLines={1}>{profileName}</Text>
               <Text style={styles.previewHandle} numberOfLines={1}>{profileHandle}</Text>
               <Text style={styles.previewBio} numberOfLines={2}>
-                {bio.trim() || 'Kisa bir bio, profiline daha net bir kesif kimligi verir.'}
+                {bio.trim() || 'Kısa bir bio, profiline daha net bir keşif kimligi verir.'}
               </Text>
             </View>
           </View>
@@ -294,7 +294,7 @@ export default function EditProfileScreen() {
           <View style={styles.formCard}>
             <SectionHeader
               title="Kimlik"
-              subtitle="Profilde gorunen temel bilgileri duzenle."
+              subtitle="Profilde görünen temel bilgileri düzenle."
             />
             <Field
               label="Ad Soyad"
@@ -304,7 +304,7 @@ export default function EditProfileScreen() {
               placeholder="Ad Soyad"
             />
             <Field
-              label="Kullanici Adi"
+              label="Kullanıcı Adi"
               value={username}
               onChangeText={setUsername}
               editable={!isSaving}
@@ -325,7 +325,7 @@ export default function EditProfileScreen() {
           <View style={styles.formCard}>
             <SectionHeader
               title="Profil Fotografi"
-              subtitle="Galeriden secerek profil fotografini guncelle."
+              subtitle="Galeriden secerek profil fotografini güncelle."
             />
             <TouchableOpacity
               style={styles.secondaryAction}
@@ -339,30 +339,30 @@ export default function EditProfileScreen() {
           <View style={styles.formCard}>
             <SectionHeader
               title="Gizlilik"
-              subtitle="Sifre degistirmek istemiyorsan bu alanlari bos birak."
+              subtitle="Şifre degistirmek istemiyorsan bu alanlari boş bırak."
             />
             <Field
-              label="Mevcut Sifre"
+              label="Mevcut Şifre"
               value={currentPassword}
               onChangeText={setCurrentPassword}
               editable={!isSaving}
-              placeholder="Mevcut sifre"
+              placeholder="Mevcut şifre"
               secureTextEntry
             />
             <Field
-              label="Yeni Sifre"
+              label="Yeni Şifre"
               value={newPassword}
               onChangeText={setNewPassword}
               editable={!isSaving}
-              placeholder="Yeni sifre"
+              placeholder="Yeni şifre"
               secureTextEntry
             />
             <Field
-              label="Yeni Sifre Tekrar"
+              label="Yeni Şifre Tekrar"
               value={confirmPassword}
               onChangeText={setConfirmPassword}
               editable={!isSaving}
-              placeholder="Yeni sifre tekrar"
+              placeholder="Yeni şifre tekrar"
               secureTextEntry
             />
           </View>
@@ -374,7 +374,7 @@ export default function EditProfileScreen() {
           >
             <View>
               <Text style={styles.interestButtonTitle}>Ilgi Alanlari</Text>
-              <Text style={styles.interestButtonSubtitle}>Akis ve onerilerini daha iyi ayarla</Text>
+              <Text style={styles.interestButtonSubtitle}>akış ve onerilerini daha iyi ayarla</Text>
             </View>
             <Text style={styles.interestArrow}>{'>'}</Text>
           </TouchableOpacity>

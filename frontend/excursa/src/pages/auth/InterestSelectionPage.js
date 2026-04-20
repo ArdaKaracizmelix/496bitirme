@@ -69,7 +69,7 @@ export default function InterestSelectionScreen({ route, navigation }) {
       const errorMsg =
         err.response?.data?.detail ||
         err.response?.data?.message ||
-        'Ilgi alanlari yuklenemedi. Baglantini kontrol edip tekrar dene.';
+        'Ilgi alanlari yüklenemedi. Baglantini kontrol edip tekrar dene.';
       setError(errorMsg);
       console.error('Failed to fetch interests:', err);
     } finally {
@@ -144,7 +144,7 @@ export default function InterestSelectionScreen({ route, navigation }) {
 
   const renderEmptyState = () => (
     <View style={styles.stateWrap}>
-      <Text style={styles.stateTitle}>Liste su an bos gorunuyor</Text>
+      <Text style={styles.stateTitle}>Liste su an boş gorunuyor</Text>
       <Text style={styles.stateText}>
         Backend katalog verisi donmedi. Migration calistiysa tekrar dene.
       </Text>
@@ -166,7 +166,7 @@ export default function InterestSelectionScreen({ route, navigation }) {
           </View>
           <Text style={[styles.title, isCompact && styles.titleCompact]}>Seyahat tarzini sec</Text>
           <Text style={[styles.subtitle, isCompact && styles.subtitleCompact]}>
-            Sana daha iyi rota, mekan ve sosyal akis onermek icin ilgilerini belirleyelim.
+            Sana daha iyi rota, mekan ve sosyal akış onermek icin ilgilerini belirleyelim.
           </Text>
           <Text style={[styles.helperText, isCompact && styles.helperTextCompact]}>
             Bunlari daha sonra profilinden degistirebilirsin.

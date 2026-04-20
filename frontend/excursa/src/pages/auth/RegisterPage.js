@@ -29,7 +29,7 @@ const normalizeApiErrorItem = (item) => {
 };
 
 const normalizeApiErrors = (data) => {
-  if (!data) return { general: 'Kayit basarisiz. Tekrar dene.' };
+  if (!data) return { general: 'Kayıt başarısız. Tekrar dene.' };
   if (typeof data === 'string') return { general: data };
   if (data.detail || data.message) return { general: data.detail || data.message };
 
@@ -44,8 +44,8 @@ const translateError = (message) => {
   const value = String(message || '');
   const lower = value.toLowerCase();
   if (lower.includes('email already exists')) return 'Bu email adresi ile kayitli bir hesap var.';
-  if (lower.includes('uppercase')) return 'Sifre en az bir buyuk harf icermeli.';
-  if (lower.includes('number')) return 'Sifre en az bir rakam icermeli.';
+  if (lower.includes('uppercase')) return 'Şifre en az bir buyuk harf icermeli.';
+  if (lower.includes('number')) return 'Şifre en az bir rakam icermeli.';
   if (lower.includes('passwords do not match')) return 'Sifreler eslesmiyor.';
   if (lower.includes('full name')) return 'Ad soyad alanini kontrol et.';
   return value;
@@ -75,7 +75,7 @@ export default function RegisterPage({ navigation }) {
     if (!fullName.trim()) {
       errors.fullName = 'Ad soyad gerekli.';
     } else if (fullName.trim().length < 2) {
-      errors.fullName = 'Ad soyad en az 2 karakter olmali.';
+      errors.fullName = 'Ad soyad en az 2 karakter olmalı.';
     }
 
     if (!normalizedEmail) {
@@ -85,17 +85,17 @@ export default function RegisterPage({ navigation }) {
     }
 
     if (!password) {
-      errors.password = 'Sifre gerekli.';
+      errors.password = 'Şifre gerekli.';
     } else if (password.length < 8) {
-      errors.password = 'Sifre en az 8 karakter olmali.';
+      errors.password = 'Şifre en az 8 karakter olmalı.';
     } else if (!/[A-Z]/.test(password)) {
-      errors.password = 'Sifre en az bir buyuk harf icermeli.';
+      errors.password = 'Şifre en az bir buyuk harf icermeli.';
     } else if (!/[0-9]/.test(password)) {
-      errors.password = 'Sifre en az bir rakam icermeli.';
+      errors.password = 'Şifre en az bir rakam icermeli.';
     }
 
     if (!confirmPassword) {
-      errors.confirmPassword = 'Sifre tekrari gerekli.';
+      errors.confirmPassword = 'Şifre tekrari gerekli.';
     } else if (password !== confirmPassword) {
       errors.confirmPassword = 'Sifreler eslesmiyor.';
     }
@@ -160,7 +160,7 @@ export default function RegisterPage({ navigation }) {
   const goToLogin = () => {
     navigation.navigate('Login', {
       email: registeredEmail || email.trim().toLowerCase(),
-      message: 'Hesabini olusturduk. Giris yapabilmek icin e-postana gelen dogrulama baglantisini onayla.',
+      message: 'Hesabini olusturduk. Giriş yapabilmek icin e-postana gelen dogrulama baglantisini onayla.',
     });
   };
 
@@ -181,12 +181,12 @@ export default function RegisterPage({ navigation }) {
             </View>
             <Text style={[styles.brand, isCompact && styles.brandCompact]}>EXCURSA</Text>
             <Text style={[styles.title, isCompact && styles.titleCompact]}>
-              {isSuccess ? 'Mailini kontrol et' : 'Hesap olustur'}
+              {isSuccess ? 'Mailini kontrol et' : 'Hesap oluştur'}
             </Text>
             <Text style={[styles.subtitle, isCompact && styles.subtitleCompact]}>
               {isSuccess
-                ? 'Kaydini aldik. Guvenlik icin giris yapmadan once e-posta dogrulamani tamamlamalisin.'
-                : 'Seyahat akisina katil, rotalarini kaydet ve gezginlerle paylas.'}
+                ? 'Kaydini aldik. Guvenlik icin giriş yapmadan önce e-posta dogrulamani tamamlamalisin.'
+                : 'Seyahat akışina katil, rotalarini kaydet ve gezginlerle paylaş.'}
             </Text>
 
             {isSuccess ? (
@@ -197,7 +197,7 @@ export default function RegisterPage({ navigation }) {
                 <Text style={[styles.successTitle, isCompact && styles.successTitleCompact]}>Dogrulama e-postasi gonderildi</Text>
                 <Text style={[styles.successText, isCompact && styles.successTextCompact]}>
                   {registeredEmail} adresine gelen dogrulama baglantisini onayla.
-                  Onaydan sonra login ekranindan giris yapabilirsin.
+                  Onaydan sonra login ekranindan giriş yapabilirsin.
                 </Text>
                 <TouchableOpacity style={styles.primaryButton} onPress={goToLogin} activeOpacity={0.9}>
                   <Text style={styles.primaryButtonText}>Login ekranina git</Text>
@@ -232,7 +232,7 @@ export default function RegisterPage({ navigation }) {
                 />
 
                 <PasswordField
-                  label="Sifre"
+                  label="Şifre"
                   value={password}
                   placeholder="En az 8 karakter"
                   error={validationErrors.password}
@@ -244,7 +244,7 @@ export default function RegisterPage({ navigation }) {
                 />
 
                 <PasswordField
-                  label="Sifre Tekrar"
+                  label="Şifre Tekrar"
                   value={confirmPassword}
                   placeholder="Sifreni tekrar gir"
                   error={validationErrors.confirmPassword}
@@ -257,7 +257,7 @@ export default function RegisterPage({ navigation }) {
 
                 <View style={styles.hintBox}>
                   <Text style={styles.hintText}>
-                    Kayit sonrasi otomatik giris yapilmaz. Once e-postani dogrulaman gerekir.
+                    Kayıt sonrası otomatik giriş yapilmaz. Once e-postani dogrulaman gerekir.
                   </Text>
                 </View>
 
@@ -270,7 +270,7 @@ export default function RegisterPage({ navigation }) {
                   {isLoading ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
-                    <Text style={styles.primaryButtonText}>Kayit Ol</Text>
+                    <Text style={styles.primaryButtonText}>Kayıt Ol</Text>
                   )}
                 </TouchableOpacity>
               </>
@@ -279,7 +279,7 @@ export default function RegisterPage({ navigation }) {
             <View style={[styles.footer, isNarrow && styles.footerCompact]}>
               <Text style={[styles.footerText, isNarrow && styles.footerTextCompact]}>Zaten hesabin var mi?</Text>
               <TouchableOpacity onPress={() => navigation.navigate('Login')} disabled={isLoading}>
-                <Text style={styles.footerLink}>Giris yap</Text>
+                <Text style={styles.footerLink}>Giriş yap</Text>
               </TouchableOpacity>
             </View>
           </View>

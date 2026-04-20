@@ -24,7 +24,7 @@ import useAuthStore from '../store/authStore';
 import { buildPostLink, copyTextToClipboard } from '../utils/linkUtils';
 
 const QUICK_ITEMS = [
-  { id: 'feed', title: 'Akis', subtitle: 'Sosyal feed' },
+  { id: 'feed', title: 'Akış', subtitle: 'Sosyal feed' },
   { id: 'saved', title: 'Kayitlar', subtitle: 'Favoriler' },
 ];
 
@@ -185,7 +185,7 @@ export default function CommunityFeedScreen() {
         setShowPostOptions(false);
         setSelectedPostId(null);
       } catch (error) {
-        Alert.alert('Hata', 'Gonderi silinirken bir hata olustu.');
+        Alert.alert('Hata', 'Gönderi silinirken bir hata oluştu.');
       }
     };
 
@@ -199,9 +199,9 @@ export default function CommunityFeedScreen() {
 
     Alert.alert(
       'Gonderiyi Sil',
-      'Bu islem geri alinamaz. Devam etmek istiyor musun?',
+      'Bu işlem geri alınamaz. Devam etmek istiyor musun?',
       [
-        { text: 'Iptal', onPress: () => setShowPostOptions(false), style: 'cancel' },
+        { text: 'İptal', onPress: () => setShowPostOptions(false), style: 'cancel' },
         { text: 'Sil', onPress: runDelete, style: 'destructive' },
       ]
     );
@@ -267,8 +267,8 @@ export default function CommunityFeedScreen() {
     const copied = await copyTextToClipboard(link);
     setShowShareOptions(false);
     showFeedback(
-      copied ? 'Link kopyalandi' : 'Link hazir',
-      copied ? 'Gonderi baglantisi kopyalandi.' : link
+      copied ? 'Link kopyalandı' : 'Link hazır',
+      copied ? 'Gönderi bağlantısı kopyalandı.' : link
     );
   }, [selectedSharePost, showFeedback]);
 
@@ -313,7 +313,7 @@ export default function CommunityFeedScreen() {
           <Text style={[styles.title, isCompact && styles.titleCompact]}>
             {activeList === 'saved'
               ? 'Kaydedilenler'
-                : 'Akis'}
+                : 'Akış'}
           </Text>
         </View>
         <View style={styles.topSearchWrap}>
@@ -321,7 +321,7 @@ export default function CommunityFeedScreen() {
           <TextInput
             value={userSearchQuery}
             onChangeText={setUserSearchQuery}
-            placeholder="Kullanici ara"
+            placeholder="Kullanıcı ara"
             placeholderTextColor="#9d8f78"
             autoCapitalize="none"
             autoCorrect={false}
@@ -467,7 +467,7 @@ export default function CommunityFeedScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.stateContainer}>
           <ActivityIndicator size="large" color="#1a1a2e" />
-          <Text style={styles.stateTitle}>Akis hazirlaniyor</Text>
+          <Text style={styles.stateTitle}>Akış hazirlaniyor</Text>
           <Text style={styles.stateSubtitle}>Gezginlerden gelen son paylasimlari yukluyoruz.</Text>
         </View>
       </SafeAreaView>
@@ -476,7 +476,7 @@ export default function CommunityFeedScreen() {
 
   if (isError) {
     return renderState(
-      'Akis yuklenemedi',
+      'akış yüklenemedi',
       'Baglantini kontrol edip tekrar deneyebilirsin.',
       'Tekrar dene',
       () => refetch()
@@ -491,24 +491,24 @@ export default function CommunityFeedScreen() {
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>
               {activeList === 'saved'
-                ? 'Kayitli gonderi yok'
+                ? 'Kayitli gönderi yok'
                 : feedScope === 'following'
-                  ? 'Takip ettiklerinden gonderi yok'
-                  : 'Henuz gonderi yok'}
+                  ? 'Takip ettiklerinden gönderi yok'
+                  : 'Henüz gönderi yok'}
             </Text>
             <Text style={styles.emptySubtitle}>
               {activeList === 'saved'
                 ? 'Bir gonderiyi kaydedince burada gorunecek.'
                 : feedScope === 'following'
                   ? 'Takip etmeye basladigin hesaplarin gonderileri burada gorunecek.'
-                  : 'Ilk gezi anini paylasarak akisi baslatabilirsin.'}
+                  : 'Ilk gezi anini paylasarak akışı baslatabilirsin.'}
             </Text>
             {activeList === 'saved' ? null : (
               <TouchableOpacity
                 style={styles.stateButton}
                 onPress={() => setShowCreateOptions(true)}
               >
-                <Text style={styles.stateButtonText}>Ilk gonderini gezginlerle paylas</Text>
+                <Text style={styles.stateButtonText}>Ilk gonderini gezginlerle paylaş</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -629,15 +629,15 @@ function CreateOptionsModal({ visible, onClose, onCreatePost, onShareRoute }) {
         <Pressable style={styles.sheet}>
           <Text style={styles.sheetTitle}>Yeni paylasim</Text>
           <TouchableOpacity style={styles.sheetAction} onPress={onCreatePost}>
-            <Text style={styles.sheetActionTitle}>Gonderi olustur</Text>
-            <Text style={styles.sheetActionSubtitle}>Foto, not veya gezi ani paylas</Text>
+            <Text style={styles.sheetActionTitle}>Gönderi oluştur</Text>
+            <Text style={styles.sheetActionSubtitle}>Foto, not veya gezi ani paylaş</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sheetAction} onPress={onShareRoute}>
-            <Text style={styles.sheetActionTitle}>Rota paylas</Text>
-            <Text style={styles.sheetActionSubtitle}>Hazir gezi planini akisa ekle</Text>
+            <Text style={styles.sheetActionTitle}>Rota paylaş</Text>
+            <Text style={styles.sheetActionSubtitle}>Hazır gezi planini akışa ekle</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sheetCancel} onPress={onClose}>
-            <Text style={styles.sheetCancelText}>Iptal</Text>
+            <Text style={styles.sheetCancelText}>İptal</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>
@@ -650,17 +650,17 @@ function PostOptionsModal({ visible, onClose, onEdit, onDelete }) {
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.modalOverlay} onPress={onClose}>
         <Pressable style={styles.sheet}>
-          <Text style={styles.sheetTitle}>Gonderi secenekleri</Text>
+          <Text style={styles.sheetTitle}>Gönderi secenekleri</Text>
           <TouchableOpacity style={styles.sheetAction} onPress={onEdit}>
-            <Text style={styles.sheetActionTitle}>Duzenle</Text>
-            <Text style={styles.sheetActionSubtitle}>Icerigi veya medyayi guncelle</Text>
+            <Text style={styles.sheetActionTitle}>Düzenle</Text>
+            <Text style={styles.sheetActionSubtitle}>İçeriği veya medyayi güncelle</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.sheetAction, styles.deleteAction]} onPress={onDelete}>
             <Text style={[styles.sheetActionTitle, styles.deleteText]}>Sil</Text>
-            <Text style={styles.sheetActionSubtitle}>Bu islem geri alinamaz</Text>
+            <Text style={styles.sheetActionSubtitle}>Bu işlem geri alınamaz</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sheetCancel} onPress={onClose}>
-            <Text style={styles.sheetCancelText}>Iptal</Text>
+            <Text style={styles.sheetCancelText}>İptal</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>
@@ -673,17 +673,17 @@ function ShareOptionsModal({ visible, onClose, onCopyLink, onOpenPost }) {
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.modalOverlay} onPress={onClose}>
         <Pressable style={styles.sheet}>
-          <Text style={styles.sheetTitle}>Paylas</Text>
+          <Text style={styles.sheetTitle}>Paylaş</Text>
           <TouchableOpacity style={styles.sheetAction} onPress={onCopyLink}>
             <Text style={styles.sheetActionTitle}>Baglantiyi kopyala</Text>
-            <Text style={styles.sheetActionSubtitle}>Gonderi linkini panoya al</Text>
+            <Text style={styles.sheetActionSubtitle}>Gönderi linkini panoya al</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sheetAction} onPress={onOpenPost}>
             <Text style={styles.sheetActionTitle}>Gonderiyi ac</Text>
-            <Text style={styles.sheetActionSubtitle}>Yorumlari ve detaylari gor</Text>
+            <Text style={styles.sheetActionSubtitle}>Yorumlari ve detayları gör</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sheetCancel} onPress={onClose}>
-            <Text style={styles.sheetCancelText}>Iptal</Text>
+            <Text style={styles.sheetCancelText}>İptal</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>

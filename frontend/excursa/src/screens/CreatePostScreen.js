@@ -42,10 +42,10 @@ const C = {
 
 const MAX_MEDIA = 6;
 const CAPTION_LIMIT = 5000;
-const QUICK_LOCATIONS = ['Istanbul', 'Kapadokya', 'Izmir', 'Antalya', 'Bodrum'];
+const QUICK_LOCATIONS = ['İstanbul', 'Kapadokya', 'Izmir', 'Antalya', 'Bodrum'];
 const VISIBILITY = [
-  { label: 'Herkese Acik', value: 'PUBLIC', icon: 'W', hint: 'Topluluk akisinda gorunur.' },
-  { label: 'Takipciler', value: 'FOLLOWERS', icon: 'F', hint: 'Sadece seni takip edenler gorur.' },
+  { label: 'Herkese Acik', value: 'PUBLIC', icon: 'W', hint: 'Topluluk akışinda görünür.' },
+  { label: 'Takipçiler', value: 'FOLLOWERS', icon: 'F', hint: 'Sadece seni takip edenler görür.' },
   { label: 'Ozel', value: 'PRIVATE', icon: 'P', hint: 'Profilinde gizli kalir.' },
 ];
 
@@ -56,24 +56,24 @@ const errorMessage = (error) =>
   error?.response?.data?.detail ||
   error?.response?.data?.error ||
   error?.message ||
-  'Gonderi olusturulurken bir hata olustu.';
+  'Gönderi olusturulurken bir hata oluştu.';
 
 function Header({ canSubmit, submitting, onBack, onSubmit }) {
   return (
     <View style={styles.header}>
       <TouchableOpacity style={styles.headerGhost} onPress={onBack} disabled={submitting}>
-        <Text style={styles.headerGhostText}>Iptal</Text>
+        <Text style={styles.headerGhostText}>İptal</Text>
       </TouchableOpacity>
       <View style={styles.headerCenter}>
-        <Text style={styles.headerTitle}>Yeni Gonderi</Text>
-        <Text style={styles.headerSubtitle}>Anini toplulukla paylas</Text>
+        <Text style={styles.headerTitle}>Yeni Gönderi</Text>
+        <Text style={styles.headerSubtitle}>Anini toplulukla paylaş</Text>
       </View>
       <TouchableOpacity
         style={[styles.headerShare, (!canSubmit || submitting) && styles.headerShareDisabled]}
         onPress={onSubmit}
         disabled={!canSubmit || submitting}
       >
-        {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.headerShareText}>Paylas</Text>}
+        {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.headerShareText}>Paylaş</Text>}
       </TouchableOpacity>
     </View>
   );
@@ -128,7 +128,7 @@ function MediaCard({ media, tileSize, progress, onPick, onCamera, onRemove }) {
       <View style={styles.sectionTop}>
         <View>
           <Text style={styles.eyebrow}>Medya</Text>
-          <Text style={styles.sectionTitle}>{media.length ? `${media.length}/${MAX_MEDIA} secildi` : 'Fotograf ekle'}</Text>
+          <Text style={styles.sectionTitle}>{media.length ? `${media.length}/${MAX_MEDIA} secildi` : 'Fotoğraf ekle'}</Text>
         </View>
         {media.length > 0 && remaining > 0 && (
           <TouchableOpacity style={styles.compactAction} onPress={onPick}>
@@ -140,8 +140,8 @@ function MediaCard({ media, tileSize, progress, onPick, onCamera, onRemove }) {
       {media.length === 0 ? (
         <TouchableOpacity style={styles.dropzone} onPress={onPick}>
           <View style={styles.dropIcon}><Text style={styles.dropIconText}>+</Text></View>
-          <Text style={styles.dropTitle}>Galeriden fotograf sec</Text>
-          <Text style={styles.dropText}>Paylasimini guclendirmek icin en fazla {MAX_MEDIA} gorsel ekleyebilirsin.</Text>
+          <Text style={styles.dropTitle}>Galeriden fotoğraf sec</Text>
+          <Text style={styles.dropText}>Paylasimini guclendirmek icin en fazla {MAX_MEDIA} görsel ekleyebilirsin.</Text>
         </TouchableOpacity>
       ) : (
         <View style={styles.mediaGrid}>
@@ -201,7 +201,7 @@ function DetailsCard({
         <View style={styles.detailIcon}><Text style={styles.detailIconText}>LOC</Text></View>
         <View style={styles.detailCopy}>
           <Text style={styles.detailTitle}>{location ? location.name : 'Yer etiketle'}</Text>
-          <Text style={styles.detailText}>{location ? 'Konum gonderiye eklendi.' : 'Sehir, mekan veya rota noktasi ekle.'}</Text>
+          <Text style={styles.detailText}>{location ? 'Konum gönderiye eklendi.' : 'Şehir, mekan veya rota noktasi ekle.'}</Text>
         </View>
         {location && <TouchableOpacity style={styles.clearPill} onPress={onClearLocation}><Text style={styles.clearText}>Kaldir</Text></TouchableOpacity>}
       </TouchableOpacity>
@@ -209,8 +209,8 @@ function DetailsCard({
       <TouchableOpacity style={styles.detailRow} onPress={onTrip}>
         <View style={styles.detailIcon}><Text style={styles.detailIconText}>MAP</Text></View>
         <View style={styles.detailCopy}>
-          <Text style={styles.detailTitle} numberOfLines={1}>{trip ? trip.title : 'Rota paylas'}</Text>
-          <Text style={styles.detailText}>{trip ? routePreview?.summary || 'Rota detaylari eklendi.' : 'Kayitli rotalarindan birini gonderiye bagla.'}</Text>
+          <Text style={styles.detailTitle} numberOfLines={1}>{trip ? trip.title : 'Rota paylaş'}</Text>
+          <Text style={styles.detailText}>{trip ? routePreview?.summary || 'Rota detayları eklendi.' : 'Kayitli rotalarından birini gönderiye bagla.'}</Text>
         </View>
         {trip && <TouchableOpacity style={styles.clearPill} onPress={onClearTrip}><Text style={styles.clearText}>Kaldir</Text></TouchableOpacity>}
       </TouchableOpacity>
@@ -256,8 +256,8 @@ function BottomBar({ bottom, canSubmit, submitting, error, onSubmit }) {
   return (
     <View style={[styles.bottomBar, { paddingBottom: Math.max(bottom, 12) }]}>
       <View style={styles.bottomCopy}>
-        <Text style={styles.bottomTitle}>{error ? 'Paylasima hazir degil' : 'Paylasima hazir'}</Text>
-        <Text style={styles.bottomText} numberOfLines={1}>{error || 'Topluluga temiz ve akici bir gonderi olarak gidecek.'}</Text>
+        <Text style={styles.bottomTitle}>{error ? 'Paylasima hazır degil' : 'Paylasima hazır'}</Text>
+        <Text style={styles.bottomText} numberOfLines={1}>{error || 'Topluluga temiz ve akıcı bir gönderi olarak gidecek.'}</Text>
       </View>
       <TouchableOpacity
         style={[styles.primaryCta, isDisabled && styles.primaryCtaDisabled]}
@@ -268,7 +268,7 @@ function BottomBar({ bottom, canSubmit, submitting, error, onSubmit }) {
           <ActivityIndicator size="small" color="#fff" />
         ) : (
           <Text style={[styles.primaryCtaText, isDisabled && styles.primaryCtaTextDisabled]}>
-            Paylas
+            Paylaş
           </Text>
         )}
       </TouchableOpacity>
@@ -329,7 +329,7 @@ export default function CreatePostScreen({ route }) {
       const ownTrips = user?.username ? trips.filter((trip) => trip?.username === user.username) : trips;
       setAvailableTrips(ownTrips);
     } catch (error) {
-      Alert.alert('Hata', 'Rotalar yuklenemedi.');
+      Alert.alert('Hata', 'Rotalar yüklenemedi.');
     } finally {
       setIsLoadingTrips(false);
     }
@@ -348,7 +348,7 @@ export default function CreatePostScreen({ route }) {
     setSelectedMedia((prev) => {
       const next = [...prev, ...assets];
       if (next.length > MAX_MEDIA) {
-        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA} fotograf ekleyebilirsiniz.`);
+        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA} fotoğraf ekleyebilirsiniz.`);
       }
       return next.slice(0, MAX_MEDIA);
     });
@@ -400,7 +400,7 @@ export default function CreatePostScreen({ route }) {
       }
       const remaining = MAX_MEDIA - selectedMedia.length;
       if (remaining <= 0) {
-        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA} fotograf ekleyebilirsiniz.`);
+        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA} fotoğraf ekleyebilirsiniz.`);
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -414,7 +414,7 @@ export default function CreatePostScreen({ route }) {
       if (!result.canceled && result.assets?.length) appendMedia(result.assets);
     } catch (error) {
       console.error('Error picking media:', error);
-      Alert.alert('Hata', 'Medya secimi su an kullanilamiyor.');
+      Alert.alert('Hata', 'Medya seçimi su an kullanilamiyor.');
     }
   };
 
@@ -432,7 +432,7 @@ export default function CreatePostScreen({ route }) {
         return;
       }
       if (selectedMedia.length >= MAX_MEDIA) {
-        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA} fotograf ekleyebilirsiniz.`);
+        Alert.alert('Bilgi', `En fazla ${MAX_MEDIA} fotoğraf ekleyebilirsiniz.`);
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
@@ -444,7 +444,7 @@ export default function CreatePostScreen({ route }) {
       if (!result.canceled && result.assets?.length) appendMedia(result.assets.slice(0, 1));
     } catch (error) {
       console.error('Error taking photo:', error);
-      Alert.alert('Hata', 'Medya secimi su an kullanilamiyor.');
+      Alert.alert('Hata', 'Medya seçimi su an kullanilamiyor.');
     }
   };
 
@@ -464,7 +464,7 @@ export default function CreatePostScreen({ route }) {
     } catch (error) {
       const message = error?.response?.data?.error || error?.response?.data?.detail || error?.message || '';
       if (!message.toLowerCase().includes('public itineraries')) {
-        throw new Error(message || 'Rota paylasim baglantisi olusturulamadi.');
+        throw new Error(message || 'Rota paylasim bağlantısı oluşturulamadı.');
       }
       await TripService.updateTrip(trip.id, { visibility: 'PUBLIC' });
       const refreshed = await TripService.fetchTripById(trip.id);
@@ -517,7 +517,7 @@ export default function CreatePostScreen({ route }) {
       }
 
       await createPostMutation.mutateAsync(postData);
-      Alert.alert('Basarili', 'Gonderiniz paylasildi.');
+      Alert.alert('Başarılı', 'Gonderiniz paylaşıldı.');
       navigation.navigate('CommunityFeed');
     } catch (error) {
       console.error('Error creating post:', error);
@@ -624,7 +624,7 @@ export default function CreatePostScreen({ route }) {
               <Text style={styles.sheetTitle}>Yer etiketle</Text>
               <TextInput
                 style={styles.locationInput}
-                placeholder="Mekan, sehir veya rota noktasi yaz"
+                placeholder="Mekan, şehir veya rota noktasi yaz"
                 placeholderTextColor="#9aa1ad"
                 value={locationSearch}
                 onChangeText={setLocationSearch}
@@ -665,7 +665,7 @@ export default function CreatePostScreen({ route }) {
                   data={availableTrips}
                   keyExtractor={(item) => String(item.id)}
                   showsVerticalScrollIndicator={false}
-                  ListEmptyComponent={<Text style={styles.emptyTrip}>Henuz paylasilacak rota yok.</Text>}
+                  ListEmptyComponent={<Text style={styles.emptyTrip}>Henüz paylaşılacak rota yok.</Text>}
                   renderItem={({ item }) => (
                     <TouchableOpacity
                       style={[styles.tripItem, selectedTrip?.id === item.id && styles.tripItemSelected]}
@@ -677,7 +677,7 @@ export default function CreatePostScreen({ route }) {
                           setShowTripPicker(false);
                           setFormError('');
                         } catch (error) {
-                          Alert.alert('Hata', 'Rota detaylari yuklenemedi.');
+                          Alert.alert('Hata', 'Rota detayları yüklenemedi.');
                         } finally {
                           setIsLoadingTrips(false);
                         }

@@ -81,8 +81,8 @@ export default function PostDetailScreen() {
     const copied = await copyTextToClipboard(link);
     setShowShareOptions(false);
     showFeedback(
-      copied ? 'Link kopyalandi' : 'Link hazir',
-      copied ? 'Gonderi baglantisi kopyalandi.' : link
+      copied ? 'Link kopyalandı' : 'Link hazır',
+      copied ? 'Gönderi bağlantısı kopyalandı.' : link
     );
   };
 
@@ -124,7 +124,7 @@ export default function PostDetailScreen() {
       await addCommentMutation.mutateAsync(text);
       setCommentText('');
     } catch (error) {
-      showFeedback('Hata', 'Yorum eklenirken bir hata olustu.');
+      showFeedback('Hata', 'Yorum eklenirken bir hata oluştu.');
     }
   };
 
@@ -149,7 +149,7 @@ export default function PostDetailScreen() {
             {post?.user_name || 'Gezgin'}
           </Text>
           <Text style={styles.ownerSub} numberOfLines={1}>
-            {post?.location ? post.location : 'Excursa seyahat akisi'} · {formatTimeAgo(post?.created_at)}
+            {post?.location ? post.location : 'Excursa seyahat akışı'} · {formatTimeAgo(post?.created_at)}
           </Text>
         </View>
       </TouchableOpacity>
@@ -194,7 +194,7 @@ export default function PostDetailScreen() {
         </View>
         <TouchableOpacity style={styles.actionButton} onPress={handleSharePress}>
           <Text style={styles.linkIcon}>↗</Text>
-          <Text style={styles.actionText}>Paylas</Text>
+          <Text style={styles.actionText}>Paylaş</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionButton} onPress={handleSave}>
           <Text style={styles.linkIcon}>{post?.saved ? '🔖' : '📑'}</Text>
@@ -234,7 +234,7 @@ export default function PostDetailScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#1a1a2e" />
-          <Text style={styles.stateText}>Gonderi yukleniyor...</Text>
+          <Text style={styles.stateText}>Gönderi yukleniyor...</Text>
         </View>
       </SafeAreaView>
     );
@@ -244,7 +244,7 @@ export default function PostDetailScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.centerContainer}>
-          <Text style={styles.errorText}>Gonderi yuklenemedi.</Text>
+          <Text style={styles.errorText}>Gönderi yüklenemedi.</Text>
           <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
             <Text style={styles.retryText}>Tekrar dene</Text>
           </TouchableOpacity>
@@ -277,7 +277,7 @@ export default function PostDetailScreen() {
               <Text style={[styles.sectionTitle, { maxWidth: contentMaxWidth }]}>Yorumlar</Text>
               {comments.length === 0 ? (
                 <View style={[styles.emptyComments, { maxWidth: contentMaxWidth }]}>
-                  <Text style={styles.emptyTitle}>Henuz yorum yok</Text>
+                  <Text style={styles.emptyTitle}>Henüz yorum yok</Text>
                   <Text style={styles.emptySubtitle}>Ilk yorumu sen yazabilirsin.</Text>
                 </View>
               ) : null}
@@ -338,13 +338,13 @@ function ShareOptionsModal({ visible, onClose, onCopyLink }) {
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.modalOverlay} onPress={onClose}>
         <Pressable style={styles.sheet}>
-          <Text style={styles.sheetTitle}>Paylas</Text>
+          <Text style={styles.sheetTitle}>Paylaş</Text>
           <TouchableOpacity style={styles.sheetAction} onPress={onCopyLink}>
             <Text style={styles.sheetActionTitle}>Baglantiyi kopyala</Text>
-            <Text style={styles.sheetActionSubtitle}>Gonderi linkini panoya al</Text>
+            <Text style={styles.sheetActionSubtitle}>Gönderi linkini panoya al</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sheetCancel} onPress={onClose}>
-            <Text style={styles.sheetCancelText}>Iptal</Text>
+            <Text style={styles.sheetCancelText}>İptal</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>

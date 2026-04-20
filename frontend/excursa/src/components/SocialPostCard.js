@@ -40,7 +40,7 @@ export default function SocialPostCard({
           <View style={styles.authorTextWrap}>
             <Text style={styles.userName} numberOfLines={1}>{userName}</Text>
             <Text style={styles.metaText} numberOfLines={1}>
-              {post?.location ? post.location : 'Excursa seyahat akisi'} · {formatTimeAgo(post?.created_at)}
+              {post?.location ? post.location : 'Excursa seyahat akışı'} · {formatTimeAgo(post?.created_at)}
             </Text>
           </View>
         </Pressable>
@@ -102,7 +102,7 @@ export default function SocialPostCard({
         ) : null}
         <TouchableOpacity onPress={() => onComment(post.id)}>
           <Text style={styles.commentsText}>
-            {commentsCount > 0 ? `${commentsCount} yorumu gor` : 'Yorum ekle'}
+            {commentsCount > 0 ? `${commentsCount} yorumu gör` : 'Yorum ekle'}
           </Text>
         </TouchableOpacity>
       </View>

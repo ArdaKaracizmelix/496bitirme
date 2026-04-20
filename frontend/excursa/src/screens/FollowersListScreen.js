@@ -19,7 +19,7 @@ export default function FollowersListScreen({ route }) {
   const { width } = useWindowDimensions();
   const routeParams = route?.params || {};
   const userId = routeParams.userId;
-  const profileName = routeParams.full_name || routeParams.user_name || 'Kullanici';
+  const profileName = routeParams.full_name || routeParams.user_name || 'Kullanıcı';
   const initialTab = routeParams.initialTab === 'following' ? 'following' : 'followers';
   const [activeTab, setActiveTab] = useState(initialTab);
   const isCompact = width < 380;
@@ -43,7 +43,7 @@ export default function FollowersListScreen({ route }) {
     <TouchableOpacity style={styles.row} onPress={() => navigateToProfile(item)}>
       <AppAvatar uri={item.avatar_url} style={styles.avatar} />
       <View style={styles.rowInfo}>
-        <Text style={styles.fullName}>{item.full_name || 'Kullanici'}</Text>
+        <Text style={styles.fullName}>{item.full_name || 'Kullanıcı'}</Text>
         <Text style={styles.username}>@{item.username || 'user'}</Text>
         {!!item.bio && (
           <Text style={styles.bio} numberOfLines={1}>
@@ -71,7 +71,7 @@ export default function FollowersListScreen({ route }) {
           onPress={() => setActiveTab('followers')}
         >
           <Text style={[styles.tabText, activeTab === 'followers' && styles.tabTextActive]}>
-            Takipciler
+            Takipçiler
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -90,7 +90,7 @@ export default function FollowersListScreen({ route }) {
         </View>
       ) : isError ? (
         <View style={styles.centerState}>
-          <Text style={styles.errorText}>Liste yuklenemedi.</Text>
+          <Text style={styles.errorText}>Liste yüklenemedi.</Text>
           <TouchableOpacity style={styles.retryButton} onPress={refetch}>
             <Text style={styles.retryText}>Tekrar Dene</Text>
           </TouchableOpacity>
@@ -101,7 +101,7 @@ export default function FollowersListScreen({ route }) {
           keyExtractor={(item) => item.id}
           renderItem={renderRow}
           contentContainerStyle={list.length ? styles.listContent : styles.emptyContent}
-          ListEmptyComponent={<Text style={styles.emptyText}>Henuz kimse yok.</Text>}
+          ListEmptyComponent={<Text style={styles.emptyText}>Henüz kimse yok.</Text>}
         />
       )}
     </SafeAreaView>
