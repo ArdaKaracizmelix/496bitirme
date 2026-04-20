@@ -37,9 +37,7 @@ export const locationService = {
         params.append('interests_only', 'true');
       }
 
-      const response = await api.get(`/locations/pois/nearby/?${params}`, {
-        skipAuth: true,
-      });
+      const response = await api.get(`/locations/pois/nearby/?${params}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching nearby POIs:', error);
@@ -73,9 +71,7 @@ export const locationService = {
         params.append('interests_only', 'true');
       }
 
-      const response = await api.get(`/locations/pois/viewport/?${params}`, {
-        skipAuth: true,
-      });
+      const response = await api.get(`/locations/pois/viewport/?${params}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching POIs in viewport:', error);
