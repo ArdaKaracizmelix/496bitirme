@@ -134,6 +134,7 @@ DATABASES = {
 }
 
 # MongoDB Configuration for Community App
+MONGO_URI = os.getenv('MONGO_URI', '').strip()
 MONGODB_DATABASES = {
     'default': {
         'name': os.getenv('MONGO_DB_NAME', 'excursa_community'),
@@ -148,7 +149,13 @@ MONGODB_DATABASES = {
 # Configure mongoengine
 import mongoengine
 try:
-    if MONGODB_DATABASES['default']['username'] and MONGODB_DATABASES['default']['password']:
+    if MONGO_URI:
+        mongoengine.connect(
+            db=MONGODB_DATABASES['default']['name'],
+            host=MONGO_URI,
+            tz_aware=MONGODB_DATABASES['default']['tz_aware'],
+        )
+    elif MONGODB_DATABASES['default']['username'] and MONGODB_DATABASES['default']['password']:
         mongoengine.connect(
             db=MONGODB_DATABASES['default']['name'],
             host=MONGODB_DATABASES['default']['host'],
