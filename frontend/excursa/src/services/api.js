@@ -7,6 +7,7 @@ const envApiUrl =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL) || '';
 const envApiPort =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_PORT) || '8000';
+const DEFAULT_PROD_API_URL = 'https://excursa.onrender.com/api';
 
 const normalizeApiUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
 const normalizeApiPath = (pathname = '') => {
@@ -61,6 +62,11 @@ const resolveApiUrl = () => {
 
   if (normalizedEnvUrl && typeof console !== 'undefined') {
     console.warn('[API] Invalid EXPO_PUBLIC_API_URL. Falling back to auto host detection.');
+  }
+
+  // Standalone builds can miss local dev host detection; prefer stable production backend.
+  if (typeof __DEV__ !== 'undefined' && !__DEV__) {
+    return DEFAULT_PROD_API_URL;
   }
 
   if (Platform.OS !== 'web') {
