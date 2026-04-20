@@ -265,7 +265,7 @@ function MainTabs() {
         name="Social" 
         component={SocialStack}
         options={{
-          tabBarLabel: 'Akis',
+          tabBarLabel: 'Akış',
         }}
       />
       <Tab.Screen 
